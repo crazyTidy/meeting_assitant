@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./meeting-assistant-backend
+      dockerfile: Dockerfile
+    container_name: meeting-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=Meeting Assistant
+      - DEBUG=false
+      - DATABASE_URL=sqlite+aiosqlite:///./meeting_assistant.db
+      - UPLOAD_DIR=uploads
+      - MAX_UPLOAD_SIZE=104857600
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
+      - SEPARATION_API_KEY=${SEPARATION_API_KEY}
+      - SEPARATION_API_URL=${SEPARATION_API_URL}
+    volumes:
+      - backend-data:/app/uploads
+      - backend-db:/app
+    networks:
+      - meeting-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./meeting-assistant-frontend
+      dockerfile: Dockerfile
+    container_name: meeting-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - meeting-network
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+    driver: local
+  backend-db:
+    driver: local
+
+networks:
+  meeting-network:
+    driver: bridge
