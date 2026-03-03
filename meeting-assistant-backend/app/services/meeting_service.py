@@ -185,6 +185,34 @@ class MeetingService:
         return await self.repository.delete(db, meeting_id)
 
 
+class SummaryService:
+    """Business logic for summaries."""
+
+    def __init__(self):
+        self.repository = summary_repository
+
+    async def update_summary(
+        self,
+        db: AsyncSession,
+        meeting_id: str,
+        content: str
+    ) -> Optional[dict]:
+        """Update summary content."""
+        updated = await self.repository.update(
+            db=db,
+            meeting_id=meeting_id,
+            content=content
+        )
+
+        if updated:
+            return {
+                "id": updated.id,
+                "content": updated.content,
+                "generated_at": updated.generated_at.isoformat()
+            }
+        return None
+
+
 class ParticipantService:
     """Business logic for participants."""
 
@@ -263,4 +291,5 @@ class ParticipantService:
 
 # Singleton instances
 meeting_service = MeetingService()
+summary_service = SummaryService()
 participant_service = ParticipantService()

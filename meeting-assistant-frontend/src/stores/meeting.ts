@@ -173,6 +173,26 @@ export const useMeetingStore = defineStore('meeting', () => {
     }
   }
 
+  async function updateSummary(meetingId: string, content: string) {
+    try {
+      console.log('Store: Calling updateSummary API', meetingId)
+      const updated = await meetingApi.updateSummary(meetingId, content)
+      console.log('Store: API response', updated)
+
+      // Update local state
+      if (currentMeeting.value?.id === meetingId && currentMeeting.value.summary) {
+        currentMeeting.value.summary.content = updated.content
+        console.log('Store: Local state updated')
+      }
+
+      return updated
+    } catch (e: any) {
+      console.error('Store: updateSummary error', e)
+      error.value = e.message
+      throw e
+    }
+  }
+
   function setPage(newPage: number) {
     page.value = newPage
     fetchMeetings()
@@ -210,6 +230,7 @@ export const useMeetingStore = defineStore('meeting', () => {
     updateSpeakerName,
     pollStatus,
     downloadAudio,
+    updateSummary,
     setPage,
     setSearch,
     clearError

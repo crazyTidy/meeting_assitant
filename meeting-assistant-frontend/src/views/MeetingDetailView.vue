@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
 import { marked } from 'marked'
 import type { MeetingStatus } from '@/types'
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
+import { saveAs } from 'file-saver'
 
 const route = useRoute()
 const store = useMeetingStore()
@@ -165,6 +167,212 @@ watch(() => store.currentMeeting?.status, (newStatus) => {
     stopPolling()
   }
 })
+
+// Copy summary to clipboard
+const copySuccess = ref(false)
+const copying = ref(false)
+
+const copySummary = async () => {
+  if (!store.currentMeeting?.summary?.content) return
+
+  copying.value = true
+  try {
+    await navigator.clipboard.writeText(store.currentMeeting.summary.content)
+    copySuccess.value = true
+    setTimeout(() => {
+      copySuccess.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  } finally {
+    copying.value = false
+  }
+}
+
+// Parse markdown and convert to docx paragraphs
+const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
+  const lines = markdown.split('\n')
+  const paragraphs: Paragraph[] = []
+
+  for (const line of lines) {
+    if (line.trim() === '') {
+      paragraphs.push(new Paragraph({ text: '' }))
+      continue
+    }
+
+    // Check for headings
+    if (line.startsWith('### ')) {
+      paragraphs.push(new Paragraph({
+        text: line.substring(4),
+        heading: HeadingLevel.HEADING_3,
+        spacing: { before: 200, after: 100 }
+      }))
+    } else if (line.startsWith('## ')) {
+      paragraphs.push(new Paragraph({
+        text: line.substring(3),
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 300, after: 150 }
+      }))
+    } else if (line.startsWith('# ')) {
+      paragraphs.push(new Paragraph({
+        text: line.substring(2),
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 400, after: 200 }
+      }))
+    }
+    // Check for bullet points
+    else if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+      paragraphs.push(new Paragraph({
+        text: line.trim().substring(2),
+        bullet: {
+          level: 0
+        },
+        spacing: { before: 100, after: 100 }
+      }))
+    }
+    // Check for numbered lists - convert to bullet for simplicity
+    else if (/^\d+\.\s/.test(line.trim())) {
+      paragraphs.push(new Paragraph({
+        text: line.trim().replace(/^\d+\.\s/, ''),
+        bullet: {
+          level: 0
+        },
+        spacing: { before: 100, after: 100 }
+      }))
+    }
+    // Regular paragraph
+    else {
+      // Handle bold text **text**
+      let text = line
+      const children: TextRun[] = []
+      const boldRegex = /\*\*(.*?)\*\*/g
+      let lastIndex = 0
+      let match
+
+      while ((match = boldRegex.exec(text)) !== null) {
+        // Add text before bold
+        if (match.index > lastIndex) {
+          children.push(new TextRun(text.substring(lastIndex, match.index)))
+        }
+        // Add bold text
+        children.push(new TextRun({
+          text: match[1],
+          bold: true
+        }))
+        lastIndex = match.index + match[0].length
+      }
+      // Add remaining text
+      if (lastIndex < text.length) {
+        children.push(new TextRun(text.substring(lastIndex)))
+      }
+
+      // If no bold formatting found, add as simple text
+      if (children.length === 0) {
+        children.push(new TextRun(text))
+      }
+
+      paragraphs.push(new Paragraph({
+        children,
+        spacing: { before: 100, after: 100 }
+      }))
+    }
+  }
+
+  return paragraphs
+}
+
+// Download summary as docx
+const downloading = ref(false)
+
+// Edit summary state
+const editingSummary = ref(false)
+const editedContent = ref('')
+const savingSummary = ref(false)
+
+const startEditingSummary = () => {
+  if (store.currentMeeting?.summary?.content) {
+    editedContent.value = store.currentMeeting.summary.content
+    editingSummary.value = true
+  }
+}
+
+const cancelEditingSummary = () => {
+  editingSummary.value = false
+  editedContent.value = ''
+}
+
+const saveSummary = async () => {
+  if (!editedContent.value.trim()) {
+    return
+  }
+
+  savingSummary.value = true
+  try {
+    console.log('Saving summary...', meetingId.value, editedContent.value.substring(0, 50))
+    await store.updateSummary(meetingId.value, editedContent.value)
+    console.log('Summary saved successfully')
+    editingSummary.value = false
+    editedContent.value = ''
+  } catch (e: any) {
+    console.error('Failed to save summary:', e)
+    // Show error to user
+    alert(`保存失败：${e.message || '未知错误'}`)
+  } finally {
+    savingSummary.value = false
+  }
+}
+
+const downloadAsDocx = async () => {
+  if (!store.currentMeeting?.summary?.content) return
+
+  downloading.value = true
+  try {
+    const markdownContent = store.currentMeeting.summary.content
+    const paragraphs = parseMarkdownToDocx(markdownContent)
+
+    // Add title
+    const titleParagraph = new Paragraph({
+      children: [
+        new TextRun({
+          text: store.currentMeeting.title,
+          bold: true,
+          size: 32
+        })
+      ],
+      heading: HeadingLevel.TITLE,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400 }
+    })
+
+    // Add date
+    const dateParagraph = new Paragraph({
+      children: [
+        new TextRun({
+          text: `生成时间：${formatTime(store.currentMeeting.summary.generated_at)}`,
+          size: 20,
+          color: '666666'
+        })
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 600 }
+    })
+
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [titleParagraph, dateParagraph, ...paragraphs]
+      }]
+    })
+
+    const blob = await Packer.toBlob(doc)
+    const fileName = `${store.currentMeeting.title}_会议纪要.docx`
+    saveAs(blob, fileName)
+  } catch (err) {
+    console.error('Failed to download:', err)
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
 
 <template>
@@ -396,16 +604,119 @@ watch(() => store.currentMeeting?.status, (newStatus) => {
             <div class="max-w-3xl">
               <div class="flex items-center justify-between mb-8">
                 <h2 class="font-display text-2xl text-espresso-700">会议纪要</h2>
-                <span v-if="store.currentMeeting.summary" class="text-sm text-espresso-400 font-sans">
-                  生成于 {{ formatTime(store.currentMeeting.summary.generated_at) }}
-                </span>
+                <div class="flex items-center gap-3">
+                  <!-- Edit button (only show when not editing) -->
+                  <button
+                    v-if="store.currentMeeting.summary && !editingSummary"
+                    @click="startEditingSummary"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border border-cream-300 bg-white text-espresso-600 hover:border-espresso-400 hover:bg-cream-50 transition-all"
+                    title="编辑纪要"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span>编辑</span>
+                  </button>
+                  <!-- Save/Cancel buttons (show when editing) -->
+                  <template v-if="editingSummary">
+                    <button
+                      @click="saveSummary"
+                      :disabled="savingSummary"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border transition-all"
+                      :class="savingSummary
+                        ? 'bg-espresso-100 border-espresso-200 text-espresso-400 cursor-not-allowed'
+                        : 'bg-accent-sage/10 border-accent-sage text-accent-sage hover:bg-accent-sage/20'"
+                      title="保存修改"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>{{ savingSummary ? '保存中...' : '保存' }}</span>
+                    </button>
+                    <button
+                      @click="cancelEditingSummary"
+                      :disabled="savingSummary"
+                      class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border border-cream-300 bg-white text-espresso-600 hover:border-espresso-400 hover:bg-cream-50 transition-all"
+                      title="取消编辑"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span>取消</span>
+                    </button>
+                  </template>
+                  <!-- Copy button -->
+                  <button
+                    v-if="store.currentMeeting.summary && !editingSummary"
+                    @click="copySummary"
+                    :disabled="copying"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border transition-all"
+                    :class="copySuccess
+                      ? 'bg-accent-sage/10 border-accent-sage text-accent-sage'
+                      : 'bg-white border-cream-300 text-espresso-600 hover:border-espresso-400 hover:bg-cream-50'"
+                    :title="copySuccess ? '已复制!' : '复制纪要'"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path v-if="!copySuccess" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>{{ copySuccess ? '已复制' : '复制' }}</span>
+                  </button>
+                  <!-- Download button -->
+                  <button
+                    v-if="store.currentMeeting.summary && !editingSummary"
+                    @click="downloadAsDocx"
+                    :disabled="downloading"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border transition-all"
+                    :class="downloading
+                      ? 'bg-espresso-100 border-espresso-200 text-espresso-400 cursor-not-allowed'
+                      : 'bg-white border-cream-300 text-espresso-600 hover:border-espresso-400 hover:bg-cream-50'"
+                    title="下载为Word文档"
+                  >
+                    <svg class="w-4 h-4" :class="{ 'animate-spin': downloading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path v-if="!downloading" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>{{ downloading ? '生成中...' : '下载' }}</span>
+                  </button>
+                </div>
               </div>
 
               <div v-if="store.currentMeeting.summary" class="animate-fade-up">
+                <!-- View mode: rendered markdown -->
                 <article
+                  v-if="!editingSummary"
                   class="markdown-content prose prose-espresso max-w-none"
                   v-html="renderedSummary"
                 ></article>
+                <!-- Edit mode: textarea -->
+                <div v-else class="space-y-4">
+                  <div class="relative">
+                    <textarea
+                      v-model="editedContent"
+                      class="w-full min-h-[400px] p-4 bg-white border border-cream-300 rounded-lg text-espresso-700 font-sans leading-relaxed focus:outline-none focus:border-espresso-500 focus:ring-2 focus:ring-espresso-500/20 resize-y"
+                      placeholder="在此编辑会议纪要内容（支持Markdown格式）..."
+                    ></textarea>
+                    <!-- Character count -->
+                    <div class="absolute bottom-3 right-3 px-2 py-1 bg-cream-100 rounded text-xs text-espresso-500 font-sans">
+                      {{ editedContent.length }} 字符
+                    </div>
+                  </div>
+                  <p class="text-sm text-espresso-400 font-sans">
+                    <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    支持 Markdown 格式：**粗体**、*斜体*、# 标题、- 列表等
+                  </p>
+                </div>
               </div>
 
               <div v-else class="text-center py-12 text-espresso-400 font-sans">

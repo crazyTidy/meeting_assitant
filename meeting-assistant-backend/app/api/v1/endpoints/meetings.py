@@ -2,6 +2,7 @@
 from typing import Optional
 from pathlib import Path
 from urllib.parse import quote
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +16,14 @@ from app.schemas.meeting import (
     MeetingStatusResponse,
     ErrorResponse
 )
-from app.services.meeting_service import meeting_service
+from app.services.meeting_service import meeting_service, summary_service
 
 router = APIRouter()
+
+
+class SummaryUpdateRequest(BaseModel):
+    """Request model for updating summary."""
+    content: str
 
 
 @router.post(
@@ -215,3 +221,45 @@ async def download_audio(
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
     )
+
+
+@router.patch(
+    "/{meeting_id}/summary",
+    status_code=status.HTTP_200_OK,
+    responses={404: {"model": ErrorResponse}}
+)
+async def update_summary(
+    meeting_id: str,
+    request: SummaryUpdateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update meeting summary content.
+
+    - **meeting_id**: Meeting UUID
+    - **content**: New summary content in Markdown format
+    """
+    # Verify meeting exists
+    meeting = await meeting_service.get_meeting(db, meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
+        )
+
+    # Update summary
+    updated = await summary_service.update_summary(
+        db=db,
+        meeting_id=meeting_id,
+        content=request.content
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "SUMMARY_NOT_FOUND", "message": "会议纪要不存在"}}
+        )
+
+    await db.commit()
+
+    return updated

@@ -111,6 +111,16 @@ export const meetingApi = {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
+  },
+
+  // Update summary content
+  async updateSummary(meetingId: string, content: string): Promise<{ id: string; content: string; generated_at: string }> {
+    console.log('API: Sending PATCH request', `/meetings/${meetingId}/summary`, { content: content.substring(0, 50) + '...' })
+    const response = await api.patch(`/meetings/${meetingId}/summary`, {
+      content
+    })
+    console.log('API: Response received', response.status, response.data)
+    return response.data
   }
 }
 
