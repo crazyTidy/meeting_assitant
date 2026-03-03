@@ -373,11 +373,18 @@ async def process_meeting_task(meeting_id: str):
                     )
                 )
 
+            # Create speaker name mapping for proper display in prompt
+            speaker_name_map = {
+                s.speaker_id: s.display_name
+                for s in separation_result.speakers
+            }
+
             summary_content = await llm_service.generate_summary_from_timeline(
                 audio_path=meeting.audio_path,
                 speakers=separation_result.speakers,
                 meeting_title=meeting.title,
-                timeline=merged_for_llm
+                timeline=merged_for_llm,
+                speaker_name_map=speaker_name_map
             )
 
             logger.info(f"[{meeting_id}] LLM summary generated: {len(summary_content.content)} chars")

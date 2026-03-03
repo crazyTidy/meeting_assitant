@@ -121,6 +121,19 @@ export const meetingApi = {
     })
     console.log('API: Response received', response.status, response.data)
     return response.data
+  },
+
+  // Regenerate summary
+  async regenerateSummary(meetingId: string): Promise<{
+    id: string
+    status: string
+    progress: number
+    stage?: string
+    message: string
+    stage_description?: string
+  }> {
+    const response = await api.post(`/meetings/${meetingId}/regenerate-summary`)
+    return response.data
   }
 }
 

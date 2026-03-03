@@ -193,6 +193,37 @@ export const useMeetingStore = defineStore('meeting', () => {
     }
   }
 
+  async function regenerateSummary(meetingId: string) {
+    try {
+      loading.value = true
+      error.value = null
+
+      const status = await meetingApi.regenerateSummary(meetingId)
+
+      // Update local meeting status
+      if (currentMeeting.value?.id === meetingId) {
+        currentMeeting.value.status = status.status as any
+        currentMeeting.value.progress = status.progress
+        currentMeeting.value.stage = status.stage as any
+      }
+
+      // Also update meeting in list
+      const meeting = meetings.value.find(m => m.id === meetingId)
+      if (meeting) {
+        meeting.status = status.status as any
+        meeting.progress = status.progress
+        meeting.stage = status.stage as any
+      }
+
+      return status
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
   function setPage(newPage: number) {
     page.value = newPage
     fetchMeetings()
@@ -231,6 +262,7 @@ export const useMeetingStore = defineStore('meeting', () => {
     pollStatus,
     downloadAudio,
     updateSummary,
+    regenerateSummary,
     setPage,
     setSearch,
     clearError

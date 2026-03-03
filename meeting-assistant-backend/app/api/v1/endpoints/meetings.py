@@ -16,7 +16,7 @@ from app.schemas.meeting import (
     MeetingStatusResponse,
     ErrorResponse
 )
-from app.services.meeting_service import meeting_service, summary_service
+from app.services.meeting_service import meeting_service, summary_service, regenerate_service
 
 router = APIRouter()
 
@@ -263,3 +263,43 @@ async def update_summary(
     await db.commit()
 
     return updated
+
+
+@router.post(
+    "/{meeting_id}/regenerate-summary",
+    response_model=MeetingStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Cannot regenerate summary"},
+        404: {"model": ErrorResponse, "description": "Meeting not found"}
+    }
+)
+async def regenerate_summary(
+    meeting_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Regenerate meeting summary using existing speaker segments.
+
+    This endpoint triggers a background task to regenerate the AI summary
+    based on the existing speaker timeline data. Useful when you want to
+    improve the summary quality or the original generation failed.
+
+    - **meeting_id**: Meeting UUID
+
+    Returns the processing status. The actual generation happens in background.
+    """
+    result = await regenerate_service.regenerate_summary(
+        db=db,
+        meeting_id=meeting_id,
+        background_tasks=background_tasks
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
+        )
+
+    return result

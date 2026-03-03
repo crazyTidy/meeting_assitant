@@ -131,6 +131,10 @@ const startPolling = () => {
     try {
       const status = await store.pollStatus(meetingId.value)
       if (status.status === 'completed' || status.status === 'failed') {
+        // Clear regenerating flag if set
+        if (regeneratingSummary.value) {
+          regeneratingSummary.value = false
+        }
         // Refresh full details
         await store.fetchMeetingDetail(meetingId.value)
         stopPolling()
@@ -160,11 +164,19 @@ onUnmounted(() => {
 })
 
 // Watch for meeting changes to manage polling
-watch(() => store.currentMeeting?.status, (newStatus) => {
+watch(() => store.currentMeeting?.status, (newStatus, oldStatus) => {
   if (newStatus === 'pending' || newStatus === 'processing') {
     startPolling()
-  } else {
+  } else if ((newStatus === 'completed' || newStatus === 'failed') && (oldStatus === 'processing' || oldStatus === 'pending')) {
     stopPolling()
+    // If we were regenerating and it completed, show success message
+    if (regeneratingSummary.value) {
+      regeneratingSummary.value = false
+      if (newStatus === 'completed') {
+        // Successfully regenerated - the page will auto-refresh with new content
+        // You could show a toast notification here if needed
+      }
+    }
   }
 })
 
@@ -289,6 +301,12 @@ const editingSummary = ref(false)
 const editedContent = ref('')
 const savingSummary = ref(false)
 
+// Regenerate summary state
+const showRegenerateConfirm = ref(false)
+const regeneratingSummary = ref(false)
+const previewContent = ref('')
+const showPreviewDialog = ref(false)
+
 const startEditingSummary = () => {
   if (store.currentMeeting?.summary?.content) {
     editedContent.value = store.currentMeeting.summary.content
@@ -372,6 +390,41 @@ const downloadAsDocx = async () => {
   } finally {
     downloading.value = false
   }
+}
+
+// Regenerate summary functions
+const confirmRegenerate = () => {
+  showRegenerateConfirm.value = true
+}
+
+const cancelRegenerate = () => {
+  showRegenerateConfirm.value = false
+}
+
+const handleRegenerateSummary = async () => {
+  showRegenerateConfirm.value = false
+  regeneratingSummary.value = true
+
+  try {
+    // Store the current content for preview later
+    if (store.currentMeeting?.summary?.content) {
+      previewContent.value = store.currentMeeting.summary.content
+    }
+
+    // Start regeneration
+    await store.regenerateSummary(meetingId.value)
+
+    // Start polling for completion
+    startPolling()
+  } catch (e: any) {
+    alert(`重新生成失败：${e.message || '未知错误'}`)
+    regeneratingSummary.value = false
+  }
+}
+
+const cancelPreview = () => {
+  showPreviewDialog.value = false
+  previewContent.value = ''
 }
 </script>
 
@@ -458,8 +511,8 @@ const downloadAsDocx = async () => {
         </div>
       </div>
 
-      <!-- Processing State -->
-      <div v-if="store.currentMeeting.status === 'pending' || store.currentMeeting.status === 'processing'" class="max-w-7xl mx-auto px-6 py-20">
+      <!-- Processing State - only show if no merged segments yet (initial processing) -->
+      <div v-if="(store.currentMeeting.status === 'pending' || store.currentMeeting.status === 'processing') && !store.currentMeeting.merged_segments?.length" class="max-w-7xl mx-auto px-6 py-20">
         <div class="text-center animate-fade-up">
           <div class="w-24 h-24 mx-auto mb-6 rounded-full bg-cream-200 flex items-center justify-center">
             <svg class="w-12 h-12 text-espresso-400 animate-pulse-soft" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -478,24 +531,8 @@ const downloadAsDocx = async () => {
         </div>
       </div>
 
-      <!-- Failed State -->
-      <div v-else-if="store.currentMeeting.status === 'failed'" class="max-w-7xl mx-auto px-6 py-20">
-        <div class="text-center animate-fade-up">
-          <div class="w-24 h-24 mx-auto mb-6 rounded-full bg-accent-terracotta/10 flex items-center justify-center">
-            <svg class="w-12 h-12 text-accent-terracotta" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <h3 class="font-display text-2xl text-espresso-700 mb-2">处理失败</h3>
-          <p class="text-espresso-400 font-sans mb-4">
-            {{ store.currentMeeting.error_message || '处理过程中发生错误，请稍后重试' }}
-          </p>
-        </div>
-      </div>
-
-      <!-- Completed State - Split View -->
-      <div v-else-if="store.currentMeeting.status === 'completed'" class="max-w-7xl mx-auto">
+      <!-- Split View - show whenever we have data (regardless of overall status) -->
+      <div v-else class="max-w-7xl mx-auto">
         <div class="flex flex-col lg:flex-row min-h-[calc(100vh-280px)]">
           <!-- Left Panel - Transcript (逐字稿) -->
           <aside class="lg:w-96 xl:w-[450px] border-b lg:border-b-0 lg:border-r border-cream-300 bg-cream-50/30">
@@ -600,12 +637,51 @@ const downloadAsDocx = async () => {
           </aside>
 
           <!-- Right Panel - Summary -->
-          <main class="flex-1 p-6 lg:p-10">
-            <div class="max-w-3xl">
+          <main class="flex-1 p-6 lg:p-10 flex flex-col">
+            <div class="flex-1 overflow-y-auto max-h-[calc(100vh-200px)]" :class="{ 'overflow-hidden': (regeneratingSummary || store.currentMeeting.status === 'processing') && store.currentMeeting.summary }">
+              <div class="max-w-3xl relative">
+                <!-- Regenerating overlay - positioned relative to content area -->
+                <div
+                  v-if="(regeneratingSummary || store.currentMeeting.status === 'processing') && store.currentMeeting.summary"
+                  class="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg -m-6"
+                >
+                  <div class="text-center">
+                    <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-accent-gold/10 flex items-center justify-center">
+                      <svg class="w-8 h-8 text-accent-gold animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </div>
+                    <h3 class="font-display text-lg text-espresso-700 mb-2">正在重新生成会议纪要...</h3>
+                    <p class="text-sm text-espresso-400 font-sans">
+                      {{ store.currentMeeting.progress }}% 完成
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Content wrapper -->
+                <div>
               <div class="flex items-center justify-between mb-8">
                 <h2 class="font-display text-2xl text-espresso-700">会议纪要</h2>
                 <div class="flex items-center gap-3">
-                  <!-- Edit button (only show when not editing) -->
+                  <!-- Regenerate button - show when we have data (merged_segments) to regenerate from -->
+                  <button
+                    v-if="store.currentMeeting.merged_segments?.length && !editingSummary"
+                    @click="confirmRegenerate"
+                    :disabled="regeneratingSummary"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-sans rounded-lg border transition-all"
+                    :class="regeneratingSummary
+                      ? 'bg-espresso-100 border-espresso-200 text-espresso-400 cursor-not-allowed'
+                      : 'bg-accent-gold/10 border-accent-gold text-accent-gold hover:bg-accent-gold/20'"
+                    title="重新生成纪要"
+                  >
+                    <svg class="w-4 h-4" :class="{ 'animate-spin': regeneratingSummary }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>{{ regeneratingSummary ? '重新生成中...' : '重新生成' }}</span>
+                  </button>
+                  <!-- Edit button (only show when not editing and has summary) -->
                   <button
                     v-if="store.currentMeeting.summary && !editingSummary"
                     @click="startEditingSummary"
@@ -719,14 +795,141 @@ const downloadAsDocx = async () => {
                 </div>
               </div>
 
-              <div v-else class="text-center py-12 text-espresso-400 font-sans">
-                暂无会议纪要
+              <!-- No summary / Failed state -->
+              <div v-else class="text-center py-12">
+                <!-- Failed with error message -->
+                <div v-if="store.currentMeeting.status === 'failed' && store.currentMeeting.error_message" class="space-y-4">
+                  <div class="w-16 h-16 mx-auto rounded-full bg-accent-terracotta/10 flex items-center justify-center">
+                    <svg class="w-8 h-8 text-accent-terracotta" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <h3 class="font-display text-lg text-espresso-700">会议纪要生成失败</h3>
+                  <p class="text-sm text-espresso-400 font-sans max-w-md mx-auto">
+                    {{ store.currentMeeting.error_message }}
+                  </p>
+                  <button
+                    @click="confirmRegenerate"
+                    :disabled="regeneratingSummary"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-sm font-sans rounded-lg bg-accent-gold text-white hover:bg-accent-gold/80 transition-all"
+                  >
+                    <svg class="w-4 h-4" :class="{ 'animate-spin': regeneratingSummary }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>{{ regeneratingSummary ? '重新生成中...' : '重新生成会议纪要' }}</span>
+                  </button>
+                </div>
+                <!-- Still processing (initial generation) -->
+                <div v-else-if="store.currentMeeting.status === 'processing'" class="space-y-4">
+                  <div class="w-16 h-16 mx-auto rounded-full bg-cream-200 flex items-center justify-center">
+                    <svg class="w-8 h-8 text-espresso-400 animate-pulse-soft" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+                  <h3 class="font-display text-lg text-espresso-700">正在生成会议纪要...</h3>
+                  <p class="text-sm text-espresso-400 font-sans">
+                    {{ store.currentMeeting.progress }}% 完成
+                  </p>
+                </div>
+                <!-- No summary (other cases) -->
+                <div v-else class="text-espresso-400 font-sans">
+                  暂无会议纪要
+                </div>
               </div>
+              <!-- Content wrapper end -->
             </div>
+            <!-- max-w-3xl relative end -->
+            </div>
+            <!-- flex-1 overflow-y-auto end -->
+          </div>
+          <!-- main end -->
           </main>
         </div>
       </div>
     </template>
+
+    <!-- Regenerate Confirm Dialog -->
+    <div
+      v-if="showRegenerateConfirm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in"
+      @click.self="cancelRegenerate"
+    >
+      <div class="bg-white rounded-xl shadow-2xl p-6 max-w-md mx-4 animate-slide-up">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-accent-gold/10 flex items-center justify-center">
+            <svg class="w-5 h-5 text-accent-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </div>
+          <h3 class="font-display text-lg text-espresso-700">重新生成会议纪要</h3>
+        </div>
+        <p class="text-espresso-600 font-sans mb-6">
+          确定要重新生成会议纪要吗？这将基于现有的发言记录生成新的会议纪要，当前纪要内容将被替换。
+        </p>
+        <div class="flex justify-end gap-3">
+          <button
+            @click="cancelRegenerate"
+            class="px-4 py-2 text-sm font-sans rounded-lg border border-cream-300 bg-white text-espresso-600 hover:border-espresso-400 hover:bg-cream-50 transition-all"
+          >
+            取消
+          </button>
+          <button
+            @click="handleRegenerateSummary"
+            class="px-4 py-2 text-sm font-sans rounded-lg bg-accent-gold text-white hover:bg-accent-gold/80 transition-all"
+          >
+            重新生成
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview Dialog (shown after regeneration completes) -->
+    <div
+      v-if="showPreviewDialog"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in"
+      @click.self="cancelPreview"
+    >
+      <div class="bg-white rounded-xl shadow-2xl p-6 max-w-2xl mx-4 animate-slide-up max-h-[80vh] overflow-hidden flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-accent-sage/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-accent-sage" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 class="font-display text-lg text-espresso-700">会议纪要已重新生成</h3>
+          </div>
+          <button
+            @click="cancelPreview"
+            class="p-1 text-espresso-400 hover:text-espresso-600 transition-all"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto mb-4 p-4 bg-cream-50 rounded-lg">
+          <div class="markdown-content prose prose-espresso max-w-none" v-html="renderedSummary"></div>
+        </div>
+        <p class="text-sm text-espresso-500 font-sans mb-4">
+          新的会议纪要已自动更新。您可以继续编辑或关闭此窗口。
+        </p>
+        <div class="flex justify-end">
+          <button
+            @click="cancelPreview"
+            class="px-4 py-2 text-sm font-sans rounded-lg bg-accent-sage text-white hover:bg-accent-sage/80 transition-all"
+          >
+            确定
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 

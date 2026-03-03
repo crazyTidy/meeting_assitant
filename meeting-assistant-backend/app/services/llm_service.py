@@ -185,7 +185,8 @@ class LLMService:
         self,
         meeting_title: str,
         speakers: List[SpeakerInfo],
-        timeline: List[SpeakerSegment]
+        timeline: List[SpeakerSegment],
+        speaker_name_map: Optional[dict] = None
     ) -> str:
         """Build prompt for meeting summary generation from timeline segments with transcripts."""
 
@@ -195,9 +196,20 @@ class LLMService:
             for s in speakers
         ])
 
+        # Use display_name from map if available, otherwise use speaker_id
+        def get_speaker_display_name(speaker_id: str) -> str:
+            if speaker_name_map and speaker_id in speaker_name_map:
+                return speaker_name_map[speaker_id]
+            # Find in speakers list
+            for s in speakers:
+                if s.speaker_id == speaker_id:
+                    return s.display_name
+            return speaker_id
+
         # Build timeline as text with actual transcripts
+        # Format: [timestamp] 显示名称 (speaker_id): 发言内容
         timeline_text = "\n".join([
-            f"- [{self._format_timestamp(seg.start_time)}-{self._format_timestamp(seg.end_time)}] {seg.speaker_id}: {seg.transcript if seg.transcript else '(暂无转写文本)'}"
+            f"- [{self._format_timestamp(seg.start_time)}-{self._format_timestamp(seg.end_time)}] {get_speaker_display_name(seg.speaker_id)} ({seg.speaker_id}): {seg.transcript if seg.transcript else '(暂无转写文本)'}"
             for seg in timeline
         ])
 
@@ -263,7 +275,8 @@ class LLMService:
         audio_path: str,
         speakers: List[SpeakerInfo],
         meeting_title: str,
-        timeline: List[SpeakerSegment]
+        timeline: List[SpeakerSegment],
+        speaker_name_map: Optional[dict] = None
     ) -> SummaryResult:
         """
         Generate meeting summary using Zhipu GLM based on timeline segments.
@@ -275,6 +288,7 @@ class LLMService:
             speakers: List of speakers with metadata
             meeting_title: Title of the meeting
             timeline: List of speaker segments with timestamps
+            speaker_name_map: Optional mapping from speaker_id to display_name
 
         Returns:
             SummaryResult with generated summary structure
@@ -286,7 +300,7 @@ class LLMService:
 
         try:
             # Build prompt for LLM
-            prompt = self._build_prompt_from_timeline(meeting_title, speakers, timeline)
+            prompt = self._build_prompt_from_timeline(meeting_title, speakers, timeline, speaker_name_map)
 
             # Print the full prompt for debugging
             logger.info(f"[LLM_SUMMARY] === TIMELINE PROMPT START ===")

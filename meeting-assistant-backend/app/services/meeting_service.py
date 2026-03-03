@@ -7,9 +7,13 @@ from typing import Optional, Tuple, List
 from fastapi import UploadFile, BackgroundTasks
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 
 from app.core.config import settings
 from app.models.meeting import Meeting, MeetingStatus, ProcessingStage
+from app.models.speaker_segment import SpeakerSegment
+from app.models.merged_segment import MergedSegment
+from app.models.summary import Summary
 from app.repositories.meeting_repository import (
     meeting_repository,
     participant_repository,
@@ -17,6 +21,7 @@ from app.repositories.meeting_repository import (
 )
 from app.schemas.meeting import MeetingListResponse, MeetingStatusResponse
 from app.tasks.processor import process_meeting_task
+from app.tasks.regenerator import regenerate_summary_task
 from app.utils.audio import get_audio_duration
 
 
@@ -289,7 +294,74 @@ class ParticipantService:
         return len(participants)
 
 
+class RegenerateService:
+    """Business logic for regenerating summaries."""
+
+    def __init__(self):
+        self.repository = meeting_repository
+
+    async def regenerate_summary(
+        self,
+        db: AsyncSession,
+        meeting_id: str,
+        background_tasks: BackgroundTasks
+    ) -> Optional[MeetingStatusResponse]:
+        """
+        Regenerate meeting summary using existing speaker segments.
+
+        This validates that the meeting has the required data (merged segments)
+        and triggers a background task to regenerate the summary.
+
+        Args:
+            db: Database session
+            meeting_id: Meeting UUID
+            background_tasks: FastAPI background tasks
+
+        Returns:
+            MeetingStatusResponse with processing status, or None if meeting not found
+        """
+        # Get meeting with details
+        meeting = await meeting_repository.get_with_details(db, meeting_id)
+        if not meeting:
+            return None
+
+        # Check if meeting has merged segments (required for regeneration)
+        if not meeting.merged_segments or len(meeting.merged_segments) == 0:
+            raise ValueError("会议没有发言记录数据，无法重新生成纪要")
+
+        # Check if meeting is currently being processed
+        if meeting.status == MeetingStatus.PROCESSING or meeting.status == MeetingStatus.PENDING:
+            raise ValueError("会议正在处理中，请等待处理完成后再重新生成")
+
+        # Update meeting status to processing
+        await meeting_repository.update_stage(
+            db=db,
+            meeting_id=meeting_id,
+            status=MeetingStatus.PROCESSING,
+            stage=ProcessingStage.SUMMARIZING,
+            progress=50,
+            error_message=None  # Clear any previous error
+        )
+        await db.commit()
+
+        # Start background regeneration task
+        background_tasks.add_task(
+            regenerate_summary_task,
+            meeting_id=meeting_id
+        )
+
+        return MeetingStatusResponse(
+            id=meeting.id,
+            status=MeetingStatus.PROCESSING,
+            progress=50,
+            stage=ProcessingStage.SUMMARIZING,
+            message="正在重新生成会议纪要...",
+            stage_description="AI 总结生成中"
+        )
+
+
 # Singleton instances
 meeting_service = MeetingService()
 summary_service = SummaryService()
 participant_service = ParticipantService()
+regenerate_service = RegenerateService()

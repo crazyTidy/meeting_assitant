@@ -57,7 +57,9 @@
       "Bash(\"\"\"\\)\n        \n        print\\(''✅ PostgreSQL 数据库表 - Database Tables:''\\)\n        for table in tables:\n            print\\(f''   ✓ {table[\"tablename\"]}''\\)\n        \n        await conn.close\\(\\)\n        print\\(f''\\\\n总共 {len\\(tables\\)} 张表已创建 - {len\\(tables\\)} tables created''\\)\n    except Exception as e:\n        print\\(f''Error: {e}''\\)\n\nasyncio.run\\(check_tables\\(\\)\\)\nPYEOF\")",
       "Bash(docker volume inspect:*)",
       "Bash(docker volume:*)",
-      "Bash(docker port:*)"
+      "Bash(docker port:*)",
+      "Bash(npm run:*)",
+      "Bash(npx vue-tsc:*)"
     ]
   }
 }
