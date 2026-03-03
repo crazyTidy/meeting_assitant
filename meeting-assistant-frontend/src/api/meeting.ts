@@ -94,6 +94,23 @@ export const meetingApi = {
       data
     )
     return response.data
+  },
+
+  // Download audio file
+  async downloadAudio(meetingId: string, filename: string): Promise<void> {
+    const response = await api.get(`/meetings/${meetingId}/audio`, {
+      responseType: 'blob'
+    })
+
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
   }
 }
 

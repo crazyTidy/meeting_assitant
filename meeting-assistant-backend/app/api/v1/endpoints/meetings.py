@@ -1,9 +1,13 @@
 """Meeting API endpoints."""
 from typing import Optional
+from pathlib import Path
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.schemas.meeting import (
     MeetingResponse,
     MeetingDetailResponse,
@@ -156,3 +160,58 @@ async def delete_meeting(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
         )
+
+
+@router.get(
+    "/{meeting_id}/audio",
+    responses={404: {"model": ErrorResponse}}
+)
+async def download_audio(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Download the original audio file for a meeting.
+
+    - **meeting_id**: Meeting UUID
+    """
+    meeting = await meeting_service.get_meeting(db, meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
+        )
+
+    audio_path = Path(meeting.audio_path)
+    if not audio_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "FILE_NOT_FOUND", "message": "音频文件不存在"}}
+        )
+
+    # Determine media type based on file extension
+    media_type = "audio/mpeg"
+    if audio_path.suffix == ".wav":
+        media_type = "audio/wav"
+    elif audio_path.suffix == ".m4a":
+        media_type = "audio/mp4"
+    elif audio_path.suffix == ".flac":
+        media_type = "audio/flac"
+    elif audio_path.suffix == ".ogg":
+        media_type = "audio/ogg"
+
+    # Create filename from title
+    safe_title = "".join(c for c in meeting.title if c.isalnum() or c in (' ', '-', '_')).strip()
+    filename = f"{safe_title}{audio_path.suffix}"
+
+    # Use RFC 5987 encoding for non-ASCII filenames
+    encoded_filename = quote(filename)
+
+    return FileResponse(
+        path=str(audio_path),
+        media_type=media_type,
+        filename=filename,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+    )

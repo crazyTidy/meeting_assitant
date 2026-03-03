@@ -66,6 +66,15 @@ const goToDetail = (meeting: Meeting) => {
   router.push(`/meetings/${meeting.id}`)
 }
 
+const handleDownload = async (meeting: Meeting, e: Event) => {
+  e.stopPropagation()
+  try {
+    await store.downloadAudio(meeting.id, meeting.title)
+  } catch (e) {
+    // Error handled by store
+  }
+}
+
 const confirmDelete = (meetingId: string, e: Event) => {
   e.stopPropagation()
   deleteConfirmId.value = meetingId
@@ -286,26 +295,41 @@ watch(searchInput, handleSearch)
             </span>
 
             <!-- Delete Button -->
-            <div class="relative">
+            <div class="flex items-center gap-1">
+              <!-- Download Button -->
               <button
-                @click="confirmDelete(meeting.id, $event)"
-                class="p-2 text-espresso-400 hover:text-accent-terracotta transition-colors"
+                @click="handleDownload(meeting, $event)"
+                class="p-2 text-espresso-400 hover:text-espresso-700 transition-colors"
+                title="下载音频"
               >
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
               </button>
 
-              <!-- Delete Confirmation Popover -->
-              <div
-                v-if="deleteConfirmId === meeting.id"
-                class="absolute right-0 top-full mt-2 p-4 bg-cream-50 rounded-lg shadow-paper-hover z-10 min-w-[200px]"
-              >
-                <p class="text-sm text-espresso-600 mb-3 font-sans">确定删除此会议？</p>
-                <div class="flex gap-2">
-                  <button @click="cancelDelete" class="btn-ghost flex-1 text-xs">取消</button>
-                  <button @click="handleDelete(meeting.id)" class="btn-primary flex-1 text-xs bg-accent-terracotta hover:bg-accent-terracotta/90">删除</button>
+              <!-- Delete Button with Confirmation -->
+              <div class="relative">
+                <button
+                  @click="confirmDelete(meeting.id, $event)"
+                  class="p-2 text-espresso-400 hover:text-accent-terracotta transition-colors"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+
+                <!-- Delete Confirmation Popover -->
+                <div
+                  v-if="deleteConfirmId === meeting.id"
+                  class="absolute right-0 top-full mt-2 p-4 bg-cream-50 rounded-lg shadow-paper-hover z-10 min-w-[200px]"
+                >
+                  <p class="text-sm text-espresso-600 mb-3 font-sans">确定删除此会议？</p>
+                  <div class="flex gap-2">
+                    <button @click="cancelDelete" class="btn-ghost flex-1 text-xs">取消</button>
+                    <button @click="handleDelete(meeting.id)" class="btn-primary flex-1 text-xs bg-accent-terracotta hover:bg-accent-terracotta/90">删除</button>
+                  </div>
                 </div>
               </div>
             </div>

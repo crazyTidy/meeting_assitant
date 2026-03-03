@@ -162,6 +162,17 @@ export const useMeetingStore = defineStore('meeting', () => {
     return status
   }
 
+  async function downloadAudio(meetingId: string, title: string) {
+    try {
+      // Create safe filename from title
+      const safeTitle = title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\s\-_]/g, '').trim()
+      await meetingApi.downloadAudio(meetingId, `${safeTitle}.mp3`)
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    }
+  }
+
   function setPage(newPage: number) {
     page.value = newPage
     fetchMeetings()
@@ -198,6 +209,7 @@ export const useMeetingStore = defineStore('meeting', () => {
     updateParticipantName,
     updateSpeakerName,
     pollStatus,
+    downloadAudio,
     setPage,
     setSearch,
     clearError
