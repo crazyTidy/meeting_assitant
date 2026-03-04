@@ -4,7 +4,14 @@ import { useRoute } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
 import { marked } from 'marked'
 import type { MeetingStatus } from '@/types'
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  AlignmentType,
+  convertMillimetersToTwip
+} from 'docx'
 import { saveAs } from 'file-saver'
 
 const route = useRoute()
@@ -201,96 +208,190 @@ const copySummary = async () => {
   }
 }
 
-// Parse markdown and convert to docx paragraphs
+/**
+ * Parse markdown and convert to docx paragraphs following GB/T 9704-2012 standard
+ * 公文字号对照：二号=22磅，三号=16磅，四号=14磅
+ */
 const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
   const lines = markdown.split('\n')
   const paragraphs: Paragraph[] = []
 
+  // 公文格式：行距固定值28磅，段前段后0行
+  const baseSpacing = {
+    line: 560, // 28磅 = 28*20缇 = 560缇
+    before: 0,
+    after: 0
+  }
+
   for (const line of lines) {
-    if (line.trim() === '') {
-      paragraphs.push(new Paragraph({ text: '' }))
+    const trimmedLine = line.trim()
+
+    // Empty line
+    if (trimmedLine === '') {
+      paragraphs.push(new Paragraph({
+        text: '',
+        spacing: baseSpacing
+      }))
       continue
     }
 
-    // Check for headings
-    if (line.startsWith('### ')) {
+    // ### 三级标题 - 三号仿宋加粗 (16磅, 加粗)
+    if (trimmedLine.startsWith('### ')) {
       paragraphs.push(new Paragraph({
-        text: line.substring(4),
-        heading: HeadingLevel.HEADING_3,
-        spacing: { before: 200, after: 100 }
-      }))
-    } else if (line.startsWith('## ')) {
-      paragraphs.push(new Paragraph({
-        text: line.substring(3),
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 300, after: 150 }
-      }))
-    } else if (line.startsWith('# ')) {
-      paragraphs.push(new Paragraph({
-        text: line.substring(2),
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 400, after: 200 }
+        children: [
+          new TextRun({
+            text: trimmedLine.substring(4),
+            font: '仿宋',
+            size: 32, // 16磅 = 16*2缇 = 32半磅
+            bold: true
+          })
+        ],
+        spacing: baseSpacing,
+        indent: { left: 0 }
       }))
     }
-    // Check for bullet points
-    else if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+    // ## 二级标题 - 三号楷体 (16磅)
+    else if (trimmedLine.startsWith('## ')) {
       paragraphs.push(new Paragraph({
-        text: line.trim().substring(2),
-        bullet: {
-          level: 0
-        },
-        spacing: { before: 100, after: 100 }
+        children: [
+          new TextRun({
+            text: trimmedLine.substring(3),
+            font: '楷体',
+            size: 32 // 16磅
+          })
+        ],
+        spacing: baseSpacing,
+        indent: { left: 0 }
       }))
     }
-    // Check for numbered lists - convert to bullet for simplicity
-    else if (/^\d+\.\s/.test(line.trim())) {
+    // # 一级标题 - 三号黑体 (16磅)
+    else if (trimmedLine.startsWith('# ')) {
       paragraphs.push(new Paragraph({
-        text: line.trim().replace(/^\d+\.\s/, ''),
-        bullet: {
-          level: 0
-        },
-        spacing: { before: 100, after: 100 }
+        children: [
+          new TextRun({
+            text: trimmedLine.substring(2),
+            font: '黑体',
+            size: 32 // 16磅
+          })
+        ],
+        spacing: baseSpacing,
+        indent: { left: 0 }
       }))
     }
-    // Regular paragraph
-    else {
-      // Handle bold text **text**
-      let text = line
-      const children: TextRun[] = []
-      const boldRegex = /\*\*(.*?)\*\*/g
-      let lastIndex = 0
-      let match
-
-      while ((match = boldRegex.exec(text)) !== null) {
-        // Add text before bold
-        if (match.index > lastIndex) {
-          children.push(new TextRun(text.substring(lastIndex, match.index)))
-        }
-        // Add bold text
-        children.push(new TextRun({
-          text: match[1],
-          bold: true
+    // Numbered list (1. 2. 3.) - 保持编号，三号仿宋
+    else if (/^\d+\.\s/.test(trimmedLine)) {
+      const match = trimmedLine.match(/^(\d+\.\s)(.*)/)
+      if (match) {
+        const [, num, content = ''] = match
+        paragraphs.push(new Paragraph({
+          children: [
+            new TextRun({
+              text: num,
+              font: '仿宋',
+              size: 32
+            }),
+            ...parseInlineFormatting(content)
+          ],
+          spacing: baseSpacing,
+          indent: {
+            left: 240, // 首行缩进2字符 = 2*1.2cm ≈ 240缇
+            hanging: 0
+          }
         }))
-        lastIndex = match.index + match[0].length
       }
-      // Add remaining text
-      if (lastIndex < text.length) {
-        children.push(new TextRun(text.substring(lastIndex)))
-      }
+    }
+    // Bullet points (- *) - 三号仿宋，无缩进
+    else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
+      paragraphs.push(new Paragraph({
+        children: [
+          new TextRun({
+            text: '○ ',
+            font: '仿宋',
+            size: 32
+          }),
+          ...parseInlineFormatting(trimmedLine.substring(2))
+        ],
+        spacing: baseSpacing,
+        indent: {
+          left: 240,
+          hanging: 0
+        }
+      }))
+    }
+    // Regular paragraph - 三号仿宋，首行缩进2字符
+    else {
+      const children = parseInlineFormatting(trimmedLine)
 
-      // If no bold formatting found, add as simple text
+      // 如果没有特殊格式，添加纯文本
       if (children.length === 0) {
-        children.push(new TextRun(text))
+        children.push(new TextRun({
+          text: trimmedLine,
+          font: '仿宋',
+          size: 32
+        }))
       }
 
       paragraphs.push(new Paragraph({
         children,
-        spacing: { before: 100, after: 100 }
+        spacing: baseSpacing,
+        indent: {
+          left: 240, // 首行缩进2字符
+          firstLine: 0 // 不单独设置首行，整体缩进即可
+        }
       }))
     }
   }
 
   return paragraphs
+}
+
+/**
+ * Parse inline formatting (bold, italic) in text
+ */
+const parseInlineFormatting = (text: string): TextRun[] => {
+  if (!text) return []
+
+  const children: TextRun[] = []
+
+  // Handle bold text **text**
+  const boldRegex = /\*\*(.*?)\*\*/g
+  let lastIndex = 0
+  let match
+
+  while ((match = boldRegex.exec(text)) !== null) {
+    // Add text before bold
+    if (match.index > lastIndex) {
+      const beforeText = text.substring(lastIndex, match.index)
+      children.push(new TextRun({
+        text: beforeText,
+        font: '仿宋',
+        size: 32
+      }))
+    }
+    // Add bold text
+    children.push(new TextRun({
+      text: match[1],
+      font: '仿宋',
+      size: 32,
+      bold: true
+    }))
+    lastIndex = match.index + match[0].length
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    children.push(new TextRun({
+      text: text.substring(lastIndex),
+      font: '仿宋',
+      size: 32
+    }))
+  }
+
+  return children.length > 0 ? children : [new TextRun({
+    text: text,
+    font: '仿宋',
+    size: 32
+  })]
 }
 
 // Download summary as docx
@@ -340,6 +441,9 @@ const saveSummary = async () => {
   }
 }
 
+/**
+ * Download as DOCX following GB/T 9704-2012 official document format
+ */
 const downloadAsDocx = async () => {
   if (!store.currentMeeting?.summary?.content) return
 
@@ -348,45 +452,71 @@ const downloadAsDocx = async () => {
     const markdownContent = store.currentMeeting.summary.content
     const paragraphs = parseMarkdownToDocx(markdownContent)
 
-    // Add title
+    // 格式化日期为公文格式：YYYY年MM月DD日
+    const generatedDate = new Date(store.currentMeeting.summary.generated_at)
+    const formattedDate = `${generatedDate.getFullYear()}年${String(generatedDate.getMonth() + 1).padStart(2, '0')}月${String(generatedDate.getDate()).padStart(2, '0')}日`
+
+    // 公文标题 - 二号方正小标宋简体 (22磅)，居中
     const titleParagraph = new Paragraph({
       children: [
         new TextRun({
           text: store.currentMeeting.title,
-          bold: true,
-          size: 32
+          font: '方正小标宋简体',
+          size: 44, // 22磅 = 22*2缇 = 44半磅
+          bold: false // 小标宋本身就是粗体效果
         })
       ],
-      heading: HeadingLevel.TITLE,
       alignment: AlignmentType.CENTER,
-      spacing: { after: 400 }
+      spacing: {
+        line: 560, // 28磅行距
+        before: 0,
+        after: 240  // 标题后空1行
+      }
     })
 
-    // Add date
-    const dateParagraph = new Paragraph({
+    // 公文版头信息（发文机关标识、日期等）- 三号仿宋
+    const headerParagraph = new Paragraph({
       children: [
         new TextRun({
-          text: `生成时间：${formatTime(store.currentMeeting.summary.generated_at)}`,
-          size: 20,
-          color: '666666'
+          text: `生成时间：${formattedDate}`,
+          font: '仿宋',
+          size: 32 // 16磅
         })
       ],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 600 }
+      spacing: {
+        line: 560,
+        before: 0,
+        after: 480  // 版头后空2行
+      }
     })
 
+    // 创建文档 - GB/T 9704-2012 公文格式页面设置
+    // A4纸：上边距3.7cm，下边距3.5cm，左边距2.8cm，右边距2.6cm
     const doc = new Document({
       sections: [{
-        properties: {},
-        children: [titleParagraph, dateParagraph, ...paragraphs]
+        properties: {
+          page: {
+            margin: {
+              top: convertMillimetersToTwip(37),   // 3.7cm
+              bottom: convertMillimetersToTwip(35), // 3.5cm
+              left: convertMillimetersToTwip(28),   // 2.8cm
+              right: convertMillimetersToTwip(26)   // 2.6cm
+            }
+          }
+        },
+        children: [titleParagraph, headerParagraph, ...paragraphs]
       }]
     })
 
     const blob = await Packer.toBlob(doc)
-    const fileName = `${store.currentMeeting.title}_会议纪要.docx`
+    // 清理文件名中的特殊字符
+    const safeTitle = store.currentMeeting.title.replace(/[\\/:*?"<>|]/g, '_')
+    const fileName = `${safeTitle}_会议纪要.docx`
     saveAs(blob, fileName)
   } catch (err) {
     console.error('Failed to download:', err)
+    alert('下载失败，请重试')
   } finally {
     downloading.value = false
   }

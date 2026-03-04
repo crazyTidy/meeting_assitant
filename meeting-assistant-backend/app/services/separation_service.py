@@ -2,7 +2,8 @@
 import logging
 from typing import List, Optional
 from dataclasses import dataclass
-import httpx
+import aiohttp
+import asyncio
 from pathlib import Path
 
 from app.core.config import settings
@@ -58,34 +59,61 @@ class SeparationService:
         logger.info(f"[VOICE_SEPARATION] API Key configured: {bool(self.api_key)}")
 
         try:
-            # Real API call to speaker diarization service
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                logger.info(f"[VOICE_SEPARATION] Opening audio file and sending API request...")
+            # Get file extension for proper MIME type
+            file_ext = Path(audio_path).suffix.lower()
+            mime_type_map = {
+                '.mp3': 'audio/mpeg',
+                '.wav': 'audio/wav',
+                '.m4a': 'audio/mp4',
+                '.flac': 'audio/flac',
+                '.ogg': 'audio/ogg'
+            }
+            mime_type = mime_type_map.get(file_ext, 'audio/mpeg')
 
+            logger.info(f"[VOICE_SEPARATION] Opening audio file and sending API request...")
+            logger.info(f"[VOICE_SEPARATION] File: {Path(audio_path).name}, MIME type: {mime_type}")
+
+            # Use aiohttp for better compatibility with the API
+            timeout = aiohttp.ClientTimeout(total=300, connect=30, sock_read=300)
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 with open(audio_path, 'rb') as f:
-                    files = {"file": (Path(audio_path).name, f, 'audio/wav')}
-                    headers = {"Authorization": f"Bearer {self.api_key}"}
-                    data = {"enable_diarization": True}
+                    file_content = f.read()
 
-                    logger.debug(f"[VOICE_SEPARATION] Request headers: {headers}")
-                    logger.debug(f"[VOICE_SEPARATION] Request data: {data}")
-
-                    response = await client.post(
-                        self.api_url,
-                        files=files,
-                        data=data
+                    # Prepare form data
+                    data = aiohttp.FormData()
+                    data.add_field(
+                        'file',
+                        file_content,
+                        filename=Path(audio_path).name,
+                        content_type=mime_type
                     )
+                    data.add_field('enable_diarization', 'true')
 
-                    logger.info(f"[VOICE_SEPARATION] API response status: {response.status_code}")
-                    logger.info(f"[VOICE_SEPARATION] API response: {response.text}")
+                    headers = {}
+                    if self.api_key:
+                        headers["Authorization"] = f"Bearer {self.api_key}"
 
-                    if response.status_code != 200:
-                        logger.error(f"[VOICE_SEPARATION] API request failed with status {response.status_code}")
-                        logger.error(f"[VOICE_SEPARATION] Response body: {response.text}")
-                        raise Exception(f"Speaker diarization API failed: {response.status_code} - {response.text}")
+                    logger.debug(f"[VOICE_SEPARATION] Request data: enable_diarization=true")
+                    logger.debug(f"[VOICE_SEPARATION] API URL: {self.api_url}")
 
-                    result = response.json()
-                    logger.info(f"[VOICE_SEPARATION] API response received, parsing results...")
+                    async with session.post(
+                        self.api_url,
+                        data=data,
+                        headers=headers
+                    ) as response:
+                        logger.info(f"[VOICE_SEPARATION] API response status: {response.status}")
+
+                        response_text = await response.text()
+                        logger.debug(f"[VOICE_SEPARATION] API response: {response_text[:500]}")
+
+                        if response.status != 200:
+                            logger.error(f"[VOICE_SEPARATION] API request failed with status {response.status}")
+                            logger.error(f"[VOICE_SEPARATION] Response body: {response_text}")
+                            raise Exception(f"Speaker diarization API failed: {response.status} - {response_text}")
+
+                        result = await response.json()
+                        logger.info(f"[VOICE_SEPARATION] API response received, parsing results...")
 
                 # Check API response code
                 if result.get("code") != 0:
@@ -94,21 +122,8 @@ class SeparationService:
                     raise Exception(f"Speaker diarization API error: {error_msg}")
 
                 # Parse API response to extract speaker segments with timestamps
-                # Actual API response format:
-                # {
-                #   "code": 0,
-                #   "message": "success",
-                #   "data": {
-                #     "segments": [
-                #       {"speaker": 0, "speaker_label": "SPEAKER_00", "start_ms": 3350, "end_ms": 3990, "text": "..."},
-                #       ...
-                #     ],
-                #     "total_duration_ms": 28190
-                #   }
-                # }
-
-                data = result.get("data", {})
-                api_segments = data.get("segments", [])
+                data_obj = result.get("data", {})
+                api_segments = data_obj.get("segments", [])
 
                 segments = []
                 speakers_dict = {}
@@ -126,8 +141,8 @@ class SeparationService:
                         speaker_id=speaker_id,
                         start_time=start_time,
                         end_time=end_time,
-                        audio_segment_path=None,  # Could be added later if API provides separated audio
-                        transcript=seg_data.get("text")  # Store transcription text
+                        audio_segment_path=None,
+                        transcript=seg_data.get("text")
                     )
                     segments.append(segment)
 
@@ -140,18 +155,12 @@ class SeparationService:
 
                 # =================================================================
                 # FALLBACK: If no speakers detected, create a default speaker
-                # This handles cases like:
-                # - Silent audio files
-                # - API returning empty results
-                # - Very short audio files
                 # =================================================================
                 if len(segments) == 0 or len(speakers_dict) == 0:
                     logger.warning(f"[VOICE_SEPARATION] No speakers detected in audio, creating default speaker")
                     logger.warning(f"[VOICE_SEPARATION] API response: {result}")
 
-                    # Create a single default speaker spanning the entire duration
-                    # Duration is in milliseconds in the new API format
-                    total_duration_ms = data.get("total_duration_ms", 60000)  # Default to 60 seconds
+                    total_duration_ms = data_obj.get("total_duration_ms", 60000)
                     default_duration = total_duration_ms / 1000.0
 
                     default_segment = SpeakerSegment(
@@ -184,7 +193,7 @@ class SeparationService:
             timeline = sorted(segments, key=lambda s: s.start_time)
 
             # Get duration from API response (convert from milliseconds to seconds)
-            duration = data.get("total_duration_ms")
+            duration = data_obj.get("total_duration_ms")
             if duration:
                 duration = duration / 1000.0  # Convert to seconds
 
@@ -200,8 +209,13 @@ class SeparationService:
         except FileNotFoundError as e:
             logger.error(f"[VOICE_SEPARATION] Audio file not found: {audio_path}")
             raise
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             logger.error(f"[VOICE_SEPARATION] API request timeout after 300 seconds")
+            raise
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"[VOICE_SEPARATION] Failed to connect to API server: {e}")
+            logger.error(f"[VOICE_SEPARATION] API URL: {self.api_url}")
+            logger.error(f"[VOICE_SEPARATION] Please check if the API server is running and accessible")
             raise
         except Exception as e:
             logger.exception(f"[VOICE_SEPARATION] Unexpected error during voice separation: {e}")
@@ -210,4 +224,3 @@ class SeparationService:
 
 # Singleton instance
 separation_service = SeparationService()
-
