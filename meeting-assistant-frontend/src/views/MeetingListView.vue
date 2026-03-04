@@ -143,9 +143,18 @@ watch(searchInput, handleSearch)
 <template>
   <div class="max-w-5xl mx-auto px-6 py-12">
     <!-- Page Header -->
-    <div class="mb-10 animate-fade-up">
-      <p class="subhead mb-3">Meeting Archive</p>
-      <h2 class="masthead">会议记录</h2>
+    <div class="mb-10 animate-fade-up flex items-center justify-between">
+      <div>
+        <p class="subhead mb-3">Meeting Archive</p>
+        <h2 class="masthead">会议记录</h2>
+      </div>
+      <router-link to="/realtime" class="btn-primary bg-accent-sage hover:bg-accent-sage/90">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+        实时转录
+      </router-link>
     </div>
 
     <!-- Search Bar -->

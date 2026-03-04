@@ -21,6 +21,11 @@ const router = createRouter({
       path: '/meetings/:id',
       name: 'MeetingDetail',
       component: () => import('@/views/MeetingDetailView.vue')
+    },
+    {
+      path: '/realtime',
+      name: 'RealtimeTranscription',
+      component: () => import('@/views/RealtimeTranscriptionView.vue')
     }
   ]
 })

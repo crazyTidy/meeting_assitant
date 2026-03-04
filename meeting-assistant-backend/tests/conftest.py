@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures."""
 import pytest
+import pytest_asyncio
 import asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -19,7 +20,7 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_engine():
     """Create a test database engine."""
     engine = create_async_engine(
@@ -39,7 +40,7 @@ async def db_engine():
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session(db_engine):
     """Create a test database session."""
     async_session = sessionmaker(
@@ -52,7 +53,7 @@ async def db_session(db_engine):
         yield session
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(db_session):
     """Create a test client."""
     async def override_get_db():

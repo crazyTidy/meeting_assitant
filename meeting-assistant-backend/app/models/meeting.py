@@ -31,6 +31,12 @@ class ProcessingStage(str, enum.Enum):
     COMPLETED = "completed"             # 100% - 全部完成
 
 
+class MeetingMode(str, enum.Enum):
+    """Meeting processing mode."""
+    FILE_UPLOAD = "file_upload"      # 原有：文件上传模式
+    REAL_TIME = "real_time"          # 新增：实时转录模式
+
+
 class Meeting(Base):
     """Meeting model."""
 
@@ -52,6 +58,17 @@ class Meeting(Base):
     )
     error_message = Column(Text, nullable=True)
     duration = Column(Float, nullable=True)  # in seconds (can be fractional)
+
+    # 实时转录模式字段
+    mode = Column(
+        Enum(MeetingMode),
+        default=MeetingMode.FILE_UPLOAD,
+        nullable=False
+    )
+    websocket_id = Column(String(100), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -83,6 +100,12 @@ class Meeting(Base):
         back_populates="meeting",
         cascade="all, delete-orphan",
         order_by="MergedSegment.start_time"
+    )
+    real_time_segments = relationship(
+        "RealTimeSegment",
+        back_populates="meeting",
+        cascade="all, delete-orphan",
+        order_by="RealTimeSegment.start_time"
     )
 
     def __repr__(self):
