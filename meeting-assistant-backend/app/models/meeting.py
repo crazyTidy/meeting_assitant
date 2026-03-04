@@ -36,6 +36,17 @@ class MeetingMode(str, enum.Enum):
     FILE_UPLOAD = "file_upload"      # 原有：文件上传模式
     REAL_TIME = "real_time"          # 新增：实时转录模式
 
+    @classmethod
+    def _missing_(cls, value):
+        """Handle case-insensitive enum lookup for legacy data."""
+        if isinstance(value, str):
+            # 尝试匹配不区分大小写
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        # 返回默认值
+        return cls.FILE_UPLOAD
+
 
 class Meeting(Base):
     """Meeting model."""
