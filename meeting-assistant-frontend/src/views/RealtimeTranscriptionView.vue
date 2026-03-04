@@ -1,93 +1,30 @@
-<template>
-  <div class="realtime-transcription">
-    <el-page-header @back="goBack" title="返回">
-      <template #content>
-        <span class="page-title">实时会议转录</span>
-      </template>
-    </el-page-header>
-
-    <el-card class="main-card" v-if="!isConnected">
-      <el-form label-width="100px">
-        <el-form-item label="会议标题">
-          <el-input v-model="meetingTitle" placeholder="请输入会议标题" />
-        </el-form-item>
-        <el-form-item label="语言">
-          <el-select v-model="language">
-            <el-option label="中文" value="zh" />
-            <el-option label="English" value="en" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="startSession">开始会议</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <div v-else class="transcription-area">
-      <el-card class="controls-card">
-        <AudioRecorder
-          @audioData="handleAudioData"
-          @recordingState="handleRecordingState"
-        />
-        <div class="connection-status">
-          <el-tag :type="isRecording ? 'success' : 'info'">
-            {{ isRecording ? '录音中' : '已暂停' }}
-          </el-tag>
-          <el-tag type="success">已连接</el-tag>
-        </div>
-      </el-card>
-
-      <el-card class="transcript-card">
-        <template #header>
-          <div class="card-header">
-            <span>转录内容</span>
-            <el-button text @click="clearTranscript">清空</el-button>
-          </div>
-        </template>
-
-        <div class="transcript-content">
-          <div
-            v-for="segment in transcripts"
-            :key="segment.segment_id"
-            class="transcript-segment"
-          >
-            <span class="speaker-label">{{ segment.speaker }}:</span>
-            <span class="transcript-text">{{ segment.text }}</span>
-            <span class="time-stamp">{{ formatTime(segment.start_time) }}</span>
-          </div>
-
-          <el-empty v-if="transcripts.length === 0" description="暂无转录内容" />
-        </div>
-      </el-card>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import AudioRecorder from '@/components/AudioRecorder.vue';
-import { TranscriptionWebSocket } from '@/utils/websocket';
-import type { TranscriptSegment } from '@/types/realtime';
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import AudioRecorder from '@/components/AudioRecorder.vue'
+import { TranscriptionWebSocket } from '@/utils/websocket'
+import type { TranscriptSegment } from '@/types/realtime'
 
-const router = useRouter();
+const router = useRouter()
 
-const meetingTitle = ref('');
-const language = ref('zh');
-const isConnected = ref(false);
-const isRecording = ref(false);
-const transcripts = ref<TranscriptSegment[]>([]);
-const wsClient = ref<TranscriptionWebSocket | null>(null);
-const meetingId = ref('');
+const meetingTitle = ref('')
+const language = ref('zh')
+const isConnected = ref(false)
+const isRecording = ref(false)
+const transcripts = ref<TranscriptSegment[]>([])
+const wsClient = ref<TranscriptionWebSocket | null>(null)
+const meetingId = ref('')
+const errorMessage = ref('')
 
 async function startSession() {
   if (!meetingTitle.value) {
-    ElMessage.warning('请输入会议标题');
-    return;
+    errorMessage.value = '请输入会议标题'
+    return
   }
 
-  wsClient.value = new TranscriptionWebSocket(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
+  errorMessage.value = ''
+
+  wsClient.value = new TranscriptionWebSocket(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000')
 
   try {
     await wsClient.value.connect(
@@ -97,139 +34,231 @@ async function startSession() {
       },
       {
         onConnected: (id) => {
-          meetingId.value = id;
-          isConnected.value = true;
-          ElMessage.success('转录服务已连接');
+          meetingId.value = id
+          isConnected.value = true
         },
         onTranscript: (segment) => {
-          transcripts.value.push(segment);
+          transcripts.value.push(segment)
           // Auto scroll to bottom
           setTimeout(() => {
-            const content = document.querySelector('.transcript-content');
-            if (content) content.scrollTop = content.scrollHeight;
-          }, 100);
+            const content = document.querySelector('.transcript-content')
+            if (content) content.scrollTop = content.scrollHeight
+          }, 100)
         },
         onError: (error) => {
-          ElMessage.error(`错误: ${error}`);
+          errorMessage.value = `错误: ${error}`
         },
         onDisconnected: () => {
-          isConnected.value = false;
-          ElMessage.warning('连接已断开');
+          isConnected.value = false
         }
       }
-    );
+    )
   } catch (error) {
-    ElMessage.error('连接失败');
-    console.error(error);
+    errorMessage.value = '连接失败，请检查服务是否启动'
+    console.error(error)
   }
 }
 
 function handleAudioData(data: ArrayBuffer) {
   if (wsClient.value && isConnected.value) {
-    wsClient.value.sendAudio(data);
+    wsClient.value.sendAudio(data)
   }
 }
 
 function handleRecordingState(recording: boolean) {
-  isRecording.value = recording;
+  isRecording.value = recording
 }
 
 function clearTranscript() {
-  transcripts.value = [];
+  transcripts.value = []
 }
 
 function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 function goBack() {
   if (isConnected.value) {
-    wsClient.value?.stop();
+    wsClient.value?.stop()
   }
-  router.push('/meetings');
+  router.push('/meetings')
+}
+
+function stopSession() {
+  if (wsClient.value) {
+    wsClient.value.stop()
+  }
+  isConnected.value = false
+  isRecording.value = false
 }
 </script>
 
+<template>
+  <div class="max-w-5xl mx-auto px-6 py-12">
+    <!-- Page Header -->
+    <div class="mb-10 animate-fade-up flex items-center gap-4">
+      <button @click="goBack" class="p-2 text-espresso-400 hover:text-espresso-700 transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <div>
+        <p class="subhead mb-1">Real-time Transcription</p>
+        <h2 class="masthead">实时会议转录</h2>
+      </div>
+    </div>
+
+    <!-- Setup Form -->
+    <div v-if="!isConnected" class="card-paper p-8 animate-fade-up delay-100 max-w-xl mx-auto">
+      <div class="mb-6">
+        <label class="block text-sm font-sans font-medium text-espresso-600 mb-2">
+          会议标题
+        </label>
+        <input
+          v-model="meetingTitle"
+          type="text"
+          placeholder="例如：产品评审会"
+          class="input-editorial"
+          maxlength="255"
+        />
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-sans font-medium text-espresso-600 mb-2">
+          语言
+        </label>
+        <select v-model="language" class="input-editorial">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+
+      <!-- Error Message -->
+      <div v-if="errorMessage" class="mb-6 p-4 bg-accent-terracotta/10 border border-accent-terracotta/30 rounded-lg">
+        <p class="text-sm text-accent-terracotta font-sans">{{ errorMessage }}</p>
+      </div>
+
+      <button @click="startSession" class="btn-primary w-full">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+        开始会议
+      </button>
+    </div>
+
+    <!-- Transcription Area -->
+    <div v-else class="space-y-6">
+      <!-- Controls Card -->
+      <div class="card-paper p-6 animate-fade-up">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-display text-xl text-espresso-700">{{ meetingTitle }}</h3>
+            <p class="text-sm text-espresso-400 font-sans mt-1">
+              会议 ID: {{ meetingId.slice(0, 8) }}
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="px-3 py-1 text-sm font-sans rounded-full"
+                  :class="{
+                    'bg-accent-sage/20 text-accent-sage': isRecording,
+                    'bg-espresso-100 text-espresso-500': !isRecording
+                  }">
+              {{ isRecording ? '录音中' : '已暂停' }}
+            </span>
+            <span class="px-3 py-1 text-sm font-sans rounded-full bg-accent-sage/20 text-accent-sage">
+              已连接
+            </span>
+          </div>
+        </div>
+
+        <AudioRecorder
+          @audioData="handleAudioData"
+          @recordingState="handleRecordingState"
+        />
+
+        <div class="mt-6 flex justify-end">
+          <button @click="stopSession" class="btn-ghost text-accent-terracotta hover:bg-accent-terracotta/10">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 10h6v4H9z" />
+            </svg>
+            结束会议
+          </button>
+        </div>
+      </div>
+
+      <!-- Transcript Card -->
+      <div class="card-paper p-6 animate-fade-up delay-100">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-display text-lg text-espresso-700">转录内容</h3>
+          <button
+            v-if="transcripts.length > 0"
+            @click="clearTranscript"
+            class="text-sm text-espresso-400 hover:text-espresso-600 transition-colors"
+          >
+            清空
+          </button>
+        </div>
+
+        <div class="transcript-content bg-cream-50 rounded-lg p-4 min-h-[300px] max-h-[500px] overflow-y-auto">
+          <div
+            v-for="segment in transcripts"
+            :key="segment.segment_id"
+            class="transcript-segment bg-white rounded-lg p-4 mb-3 shadow-sm"
+          >
+            <div class="flex items-start gap-3">
+              <span class="speaker-label font-medium text-accent-blue whitespace-nowrap">
+                {{ segment.speaker }}:
+              </span>
+              <p class="transcript-text flex-1 text-espresso-700 leading-relaxed">
+                {{ segment.text }}
+              </p>
+              <span class="time-stamp text-xs text-espresso-400 whitespace-nowrap">
+                {{ formatTime(segment.start_time) }}
+              </span>
+            </div>
+          </div>
+
+          <div v-if="transcripts.length === 0" class="flex flex-col items-center justify-center py-12">
+            <svg class="w-16 h-16 text-espresso-200 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+            <p class="text-espresso-400 font-sans">暂无转录内容</p>
+            <p class="text-sm text-espresso-300 font-sans mt-1">点击"开始录音"开始实时转录</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.realtime-transcription {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.main-card {
-  margin-top: 20px;
-}
-
-.transcription-area {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.controls-card {
-  position: sticky;
-  top: 20px;
-  z-index: 10;
-}
-
-.connection-status {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-  justify-content: center;
-}
-
-.transcript-card {
-  min-height: 400px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .transcript-content {
-  max-height: 500px;
-  overflow-y: auto;
-  padding: 12px;
-  background-color: #f5f7fa;
-  border-radius: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db #f9fafb;
 }
 
-.transcript-segment {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  margin-bottom: 8px;
-  background-color: white;
-  border-radius: 6px;
-  align-items: flex-start;
+.transcript-content::-webkit-scrollbar {
+  width: 6px;
 }
 
-.speaker-label {
-  font-weight: 600;
-  color: #409eff;
-  white-space: nowrap;
+.transcript-content::-webkit-scrollbar-track {
+  background: #f9fafb;
+  border-radius: 3px;
 }
 
-.transcript-text {
-  flex: 1;
-  line-height: 1.6;
+.transcript-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
 }
 
-.time-stamp {
-  font-size: 12px;
-  color: #909399;
-  white-space: nowrap;
+.transcript-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }
 </style>
