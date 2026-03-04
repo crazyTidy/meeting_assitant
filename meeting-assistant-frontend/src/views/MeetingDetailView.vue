@@ -3,6 +3,13 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMeetingStore } from '@/stores/meeting'
 import { marked } from 'marked'
+
+// Configure marked to treat single line breaks as <br>
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
+
 import type { MeetingStatus } from '@/types'
 import {
   Document,
@@ -124,6 +131,7 @@ const handleSpeakerKeydown = (e: KeyboardEvent, speakerId: string) => {
 
 // Polling for processing status
 let pollingInterval: number | null = null
+const lastProgress = ref(0)
 
 const startPolling = () => {
   if (pollingInterval) return
@@ -137,14 +145,29 @@ const startPolling = () => {
 
     try {
       const status = await store.pollStatus(meetingId.value)
-      if (status.status === 'completed' || status.status === 'failed') {
+
+      // Check if voice separation is complete (50%) - only refresh once when crossing 50%
+      const shouldRefreshDetails =
+        status.status === 'completed' || status.status === 'failed' ||
+        (status.progress >= 50 && lastProgress.value < 50)
+
+      if (shouldRefreshDetails) {
         // Clear regenerating flag if set
         if (regeneratingSummary.value) {
           regeneratingSummary.value = false
         }
-        // Refresh full details
+        // Refresh full details to get merged_segments
         await store.fetchMeetingDetail(meetingId.value)
-        stopPolling()
+
+        // Update lastProgress after refresh
+        lastProgress.value = store.currentMeeting?.progress || status.progress
+
+        if (status.status === 'completed' || status.status === 'failed') {
+          stopPolling()
+        }
+      } else {
+        // Just update lastProgress to track progress
+        lastProgress.value = status.progress
       }
     } catch (e) {
       // Ignore polling errors
@@ -162,6 +185,8 @@ const stopPolling = () => {
 onMounted(async () => {
   await store.fetchMeetingDetail(meetingId.value)
   if (store.currentMeeting?.status === 'pending' || store.currentMeeting?.status === 'processing') {
+    // Initialize lastProgress to current progress so we only refresh when it changes
+    lastProgress.value = store.currentMeeting.progress || 0
     startPolling()
   }
 })
@@ -209,18 +234,30 @@ const copySummary = async () => {
 }
 
 /**
- * Parse markdown and convert to docx paragraphs following GB/T 9704-2012 standard
- * 公文字号对照：二号=22磅，三号=16磅，四号=14磅
+ * Parse markdown and convert to docx paragraphs following 科大讯飞 format
+ * 科大讯飞格式：
+ * - 主标题：居中，二号黑体
+ * - "会议纪要"：三号仿宋居中
+ * - 大标题"一、二、三"：三号黑体加粗
+ * - 子标题"1. 2. 3."：三号黑体
+ * - 正文：三号仿宋，首行缩进2字符
+ * - 段落间距：240缇（12磅）
  */
 const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
   const lines = markdown.split('\n')
   const paragraphs: Paragraph[] = []
 
-  // 公文格式：行距固定值28磅，段前段后0行
-  const baseSpacing = {
-    line: 560, // 28磅 = 28*20缇 = 560缇
+  // 科大讯飞格式：行距固定值，段落间距240缇
+  const titleSpacing = {
+    line: 480,
     before: 0,
-    after: 0
+    after: 280
+  }
+
+  const contentSpacing = {
+    line: 480,
+    before: 240,
+    after: 240
   }
 
   for (const line of lines) {
@@ -230,55 +267,78 @@ const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
     if (trimmedLine === '') {
       paragraphs.push(new Paragraph({
         text: '',
-        spacing: baseSpacing
+        spacing: contentSpacing
       }))
       continue
     }
 
-    // ### 三级标题 - 三号仿宋加粗 (16磅, 加粗)
-    if (trimmedLine.startsWith('### ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine.substring(4),
-            font: '仿宋',
-            size: 32, // 16磅 = 16*2缇 = 32半磅
-            bold: true
-          })
-        ],
-        spacing: baseSpacing,
-        indent: { left: 0 }
-      }))
-    }
-    // ## 二级标题 - 三号楷体 (16磅)
-    else if (trimmedLine.startsWith('## ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine.substring(3),
-            font: '楷体',
-            size: 32 // 16磅
-          })
-        ],
-        spacing: baseSpacing,
-        indent: { left: 0 }
-      }))
-    }
-    // # 一级标题 - 三号黑体 (16磅)
-    else if (trimmedLine.startsWith('# ')) {
+    // # 主标题（文件名）- 二号黑体居中
+    if (trimmedLine.startsWith('# ')) {
       paragraphs.push(new Paragraph({
         children: [
           new TextRun({
             text: trimmedLine.substring(2),
             font: '黑体',
-            size: 32 // 16磅
+            size: 44, // 二号=22磅
+            bold: true
           })
         ],
-        spacing: baseSpacing,
+        spacing: titleSpacing,
+        alignment: AlignmentType.CENTER
+      }))
+    }
+    // ## 副标题"会议纪要" - 三号仿宋居中
+    else if (trimmedLine.startsWith('## ')) {
+      paragraphs.push(new Paragraph({
+        children: [
+          new TextRun({
+            text: trimmedLine.substring(3),
+            font: '仿宋',
+            size: 32 // 三号=16磅
+          })
+        ],
+        spacing: contentSpacing,
+        alignment: AlignmentType.CENTER
+      }))
+    }
+    // ### 大标题"一、二、三" - 三号黑体加粗
+    else if (trimmedLine.startsWith('### ')) {
+      paragraphs.push(new Paragraph({
+        children: [
+          new TextRun({
+            text: trimmedLine.substring(4),
+            font: '黑体',
+            size: 32, // 三号=16磅
+            bold: true
+          })
+        ],
+        spacing: {
+          line: 480,
+          before: 360,
+          after: 180
+        },
         indent: { left: 0 }
       }))
     }
-    // Numbered list (1. 2. 3.) - 保持编号，三号仿宋
+    // 子标题"**1. **"或"1." - 三号黑体（不加粗）
+    else if (/^\*\*(\d+\.\s)/.test(trimmedLine)) {
+      const match = trimmedLine.match(/^\*\*(\d+\.\s)(.*)\*\*/)
+      if (match) {
+        const [, num, content = ''] = match
+        paragraphs.push(new Paragraph({
+          children: [
+            new TextRun({
+              text: num + content,
+              font: '黑体',
+              size: 32 // 三号
+            })
+          ],
+          spacing: contentSpacing,
+          indent: { left: 0 }
+        }))
+      }
+    }
+    // Numbered list without bold (1. 2. 3.) - 三号黑体
     else if (/^\d+\.\s/.test(trimmedLine)) {
       const match = trimmedLine.match(/^(\d+\.\s)(.*)/)
       if (match) {
@@ -287,33 +347,48 @@ const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
           children: [
             new TextRun({
               text: num,
-              font: '仿宋',
+              font: '黑体',
               size: 32
             }),
             ...parseInlineFormatting(content)
           ],
-          spacing: baseSpacing,
-          indent: {
-            left: 240, // 首行缩进2字符 = 2*1.2cm ≈ 240缇
-            hanging: 0
-          }
+          spacing: contentSpacing,
+          indent: { left: 0 }
         }))
       }
     }
-    // Bullet points (- *) - 三号仿宋，无缩进
+    // Table "| 事项 | 责任人 | 时限 |" - 用文本格式表示
+    else if (trimmedLine.startsWith('|') && trimmedLine.endsWith('|')) {
+      // 简化处理：用文本表示表格
+      const cells = trimmedLine.split('|').filter(c => c.trim())
+      if (cells.length >= 3) {
+        // 用空格分隔的文本表示表格行
+        const tableText = cells.join('  |  ')
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({
+            text: tableText,
+            font: '仿宋',
+            size: 32,
+            bold: true
+          })],
+          spacing: contentSpacing
+        }))
+      }
+    }
+    // Bullet points (- *) - 三号仿宋，首行缩进
     else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
       paragraphs.push(new Paragraph({
         children: [
           new TextRun({
-            text: '○ ',
+            text: trimmedLine[0] + ' ',
             font: '仿宋',
             size: 32
           }),
           ...parseInlineFormatting(trimmedLine.substring(2))
         ],
-        spacing: baseSpacing,
+        spacing: contentSpacing,
         indent: {
-          left: 240,
+          left: 240, // 首行缩进2字符
           hanging: 0
         }
       }))
@@ -322,7 +397,6 @@ const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
     else {
       const children = parseInlineFormatting(trimmedLine)
 
-      // 如果没有特殊格式，添加纯文本
       if (children.length === 0) {
         children.push(new TextRun({
           text: trimmedLine,
@@ -333,10 +407,10 @@ const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
 
       paragraphs.push(new Paragraph({
         children,
-        spacing: baseSpacing,
+        spacing: contentSpacing,
         indent: {
           left: 240, // 首行缩进2字符
-          firstLine: 0 // 不单独设置首行，整体缩进即可
+          hanging: 0
         }
       }))
     }
@@ -452,16 +526,12 @@ const downloadAsDocx = async () => {
     const markdownContent = store.currentMeeting.summary.content
     const paragraphs = parseMarkdownToDocx(markdownContent)
 
-    // 格式化日期为公文格式：YYYY年MM月DD日
-    const generatedDate = new Date(store.currentMeeting.summary.generated_at)
-    const formattedDate = `${generatedDate.getFullYear()}年${String(generatedDate.getMonth() + 1).padStart(2, '0')}月${String(generatedDate.getDate()).padStart(2, '0')}日`
-
-    // 公文标题 - 二号方正小标宋简体 (22磅)，居中
+    // 公文标题 - "[会议名称]会议纪要"（标准公文格式）
     const titleParagraph = new Paragraph({
       children: [
         new TextRun({
-          text: store.currentMeeting.title,
-          font: '方正小标宋简体',
+          text: `${store.currentMeeting.title}会议纪要`,
+          font: '小标宋简体',
           size: 44, // 22磅 = 22*2缇 = 44半磅
           bold: false // 小标宋本身就是粗体效果
         })
@@ -471,23 +541,6 @@ const downloadAsDocx = async () => {
         line: 560, // 28磅行距
         before: 0,
         after: 240  // 标题后空1行
-      }
-    })
-
-    // 公文版头信息（发文机关标识、日期等）- 三号仿宋
-    const headerParagraph = new Paragraph({
-      children: [
-        new TextRun({
-          text: `生成时间：${formattedDate}`,
-          font: '仿宋',
-          size: 32 // 16磅
-        })
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: {
-        line: 560,
-        before: 0,
-        after: 480  // 版头后空2行
       }
     })
 
@@ -505,7 +558,7 @@ const downloadAsDocx = async () => {
             }
           }
         },
-        children: [titleParagraph, headerParagraph, ...paragraphs]
+        children: [titleParagraph, ...paragraphs]
       }]
     })
 
@@ -768,11 +821,12 @@ const cancelPreview = () => {
 
           <!-- Right Panel - Summary -->
           <main class="flex-1 p-6 lg:p-10 flex flex-col">
-            <div class="flex-1 overflow-y-auto max-h-[calc(100vh-200px)]" :class="{ 'overflow-hidden': (regeneratingSummary || store.currentMeeting.status === 'processing') && store.currentMeeting.summary }">
+            <div class="flex-1 overflow-y-auto max-h-[calc(100vh-200px)]" :class="{ 'overflow-hidden': regeneratingSummary && store.currentMeeting.summary }">
               <div class="max-w-3xl relative">
                 <!-- Regenerating overlay - positioned relative to content area -->
+                <!-- Only show during actual regeneration (regeneratingSummary flag), not during initial processing -->
                 <div
-                  v-if="(regeneratingSummary || store.currentMeeting.status === 'processing') && store.currentMeeting.summary"
+                  v-if="regeneratingSummary && store.currentMeeting.summary"
                   class="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg -m-6"
                 >
                   <div class="text-center">
@@ -953,10 +1007,10 @@ const cancelPreview = () => {
                 </div>
                 <!-- Still processing (initial generation) -->
                 <div v-else-if="store.currentMeeting.status === 'processing'" class="space-y-4">
-                  <div class="w-16 h-16 mx-auto rounded-full bg-cream-200 flex items-center justify-center">
-                    <svg class="w-8 h-8 text-espresso-400 animate-pulse-soft" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  <div class="w-16 h-16 mx-auto rounded-full bg-accent-gold/10 flex items-center justify-center">
+                    <svg class="w-8 h-8 text-accent-gold animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                   </div>
                   <h3 class="font-display text-lg text-espresso-700">正在生成会议纪要...</h3>
@@ -1067,5 +1121,16 @@ const cancelPreview = () => {
 /* Custom styles for markdown content */
 :deep(.markdown-content h2:first-child) {
   margin-top: 0;
+}
+
+/* Ensure line breaks are rendered correctly */
+:deep(.markdown-content p) {
+  white-space: pre-line;
+  margin-bottom: 1em;
+}
+
+/* Ensure bold text displays correctly */
+:deep(.markdown-content strong) {
+  font-weight: 600;
 }
 </style>

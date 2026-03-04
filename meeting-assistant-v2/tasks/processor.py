@@ -1,19 +1,25 @@
+#!/usr/bin/ python
+# -*- encoding: utf-8 -*-
+"""
+Author: system
+Time: 2026/03/04
+"""
 """Background task processor for meeting processing."""
 import asyncio
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
-from app.core.database import AsyncSessionLocal
-from app.models.meeting import MeetingStatus, ProcessingStage
-from app.repositories.meeting_repository import (
+from ..models.database import AsyncSessionLocal
+from ..models.meeting_model import MeetingStatus, ProcessingStage
+from ..repositories.meeting_repository import (
     meeting_repository,
     participant_repository,
     summary_repository
 )
-from app.models.speaker_segment import SpeakerSegment
-from app.models.merged_segment import MergedSegment
-from app.services.separation_service import separation_service
-from app.services.llm_service import llm_service
+from ..models.speaker_segment_model import SpeakerSegment
+from ..models.merged_segment_model import MergedSegment
+from ..services.separation_service import separation_service
+from ..services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +62,7 @@ def _merge_consecutive_segments(timeline: List) -> List[dict]:
         timeline: List of SpeakerSegment objects sorted by start_time
 
     Returns:
-        List of merged segment dictionaries with keys:
-        - speaker_id: Speaker identifier
-        - start_time: Start time in seconds
-        - end_time: End time in seconds
-        - duration: Duration in seconds
-        - transcript: Combined transcript text
-        - segment_count: Number of original segments merged
+        List of merged segment dictionaries
     """
     if not timeline:
         return []
@@ -277,22 +277,6 @@ async def process_meeting_task(meeting_id: str):
             # =================================================================
             _log_separator(f"[{meeting_id}] STEP 1.4: MERGING CONSECUTIVE SEGMENTS")
 
-            # 打印原始人声分离结果日志
-            _log_separator(f"[{meeting_id}] 音频文件结果日志 (原始发言片段)")
-            # for idx, seg in enumerate(separation_result.timeline, 1):
-            #     speaker_num = seg.speaker_id.split('_')[1] if '_' in seg.speaker_id else seg.speaker_id
-            #     start_min, start_sec = divmod(int(seg.start_time), 60)
-            #     end_min, end_sec = divmod(int(seg.end_time), 60)
-            #     duration = seg.end_time - seg.start_time
-            #     transcript_preview = (seg.transcript[:100] + '...') if seg.transcript and len(seg.transcript) > 100 else (seg.transcript or '')
-                # logger.info(
-                #     f"[{meeting_id}] [{idx}] 说话人{speaker_num} | "
-                #     f"时间: {start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d} | "
-                #     f"时长: {duration:.1f}s | "
-                #     f"内容: {transcript_preview}"
-                # )
-            _log_separator()
-
             merged_segments = _merge_consecutive_segments(separation_result.timeline)
             logger.info(f"[{meeting_id}] Merged {segments_created} original segments into {len(merged_segments)} combined segments")
 
@@ -380,6 +364,7 @@ async def process_meeting_task(meeting_id: str):
 
             # Generate summary using LLM with actual transcripts
             # Build merged segments with transcripts for LLM
+            from ..services.separation_service import SpeakerSegment
             merged_for_llm = []
             for merged_seg in merged_segments:
                 merged_for_llm.append(

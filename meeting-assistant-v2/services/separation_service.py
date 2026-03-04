@@ -1,3 +1,9 @@
+#!/usr/bin/ python
+# -*- encoding: utf-8 -*-
+"""
+Author: system
+Time: 2026/03/04
+"""
 """Voice separation service."""
 import logging
 from typing import List, Optional
@@ -6,7 +12,7 @@ import aiohttp
 import asyncio
 from pathlib import Path
 
-from app.core.config import settings
+from ..settings import environment_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +48,8 @@ class SeparationService:
     """Service for voice separation using third-party API."""
 
     def __init__(self):
-        self.api_key = settings.SEPARATION_API_KEY
-        self.api_url = settings.SEPARATION_API_URL
+        self.api_key = environment_config.SEPARATION_API_KEY
+        self.api_url = environment_config.SEPARATION_API_URL
 
     async def separate_voices(self, audio_path: str) -> SeparationResult:
         """
@@ -153,9 +159,7 @@ class SeparationService:
 
                 logger.info(f"[VOICE_SEPARATION] Parsed {len(segments)} segments, {len(speakers_dict)} speakers")
 
-                # =================================================================
                 # FALLBACK: If no speakers detected, create a default speaker
-                # =================================================================
                 if len(segments) == 0 or len(speakers_dict) == 0:
                     logger.warning(f"[VOICE_SEPARATION] No speakers detected in audio, creating default speaker")
                     logger.warning(f"[VOICE_SEPARATION] API response: {result}")

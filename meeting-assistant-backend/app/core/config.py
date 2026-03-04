@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # External APIs
     ZHIPU_API_KEY: str = "dc27759f5b5a4107b6af67aaf60e4a23.DmhTXSW9nk0eL74y"
     SEPARATION_API_KEY: str = ""
+    # SEPARATION_API_URL: str = "http://192.168.0.101:40150/recognize"  # Example local URL
     SEPARATION_API_URL: str = "http://192.168.0.100:40901/recognize"  # Example local URL
     ASR_API_KEY: str = ""  # API key for ASR service (e.g., OpenAI Whisper, iFLYTEK)
     ASR_API_URL: str = ""  # ASR service endpoint

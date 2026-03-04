@@ -3,6 +3,7 @@ import logging
 import requests
 from typing import List, Optional
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.core.config import settings
 from app.services.separation_service import SpeakerInfo, SpeakerSegment
@@ -34,58 +35,74 @@ class LLMService:
         """Build prompt for meeting summary generation with full transcript."""
 
         # Build speaker info with speaking time
-        speaker_list = "\n".join([
-            f"- {s.display_name} ({s.speaker_id}) - 发言时长: {int(s.total_duration/60)}分{int(s.total_duration%60)}秒"
-            for s in speakers
-        ])
+        speaker_list = "、".join([s.display_name for s in speakers])
 
-        prompt = f"""请根据以下会议信息和完整转录内容生成一份详细的会议纪要。
+        prompt = f"""你是专业的公文写作助手。请根据以下会议转录内容生成一份公文标准格式的会议纪要。
 
+【会议信息】
 会议标题：{meeting_title}
+参会人员：{speaker_list}
 
-参会人员：
-{speaker_list}
-
-会议转录内容：
+【会议转录内容】
 {transcript.full_text}
 
-请按照以下格式生成会议纪要（使用Markdown格式）：
+【写作要求】
+1. **内容提炼**：不要逐字逐句罗列转录内容，要对讨论进行提炼、归纳、总结
+2. **按议题组织**：根据讨论内容归纳出若干主要议题，每个议题下概括核心观点和讨论要点
+3. **引用发言**：重要观点可引用发言人并标注，如"张三指出：..."
+4. **公文格式**：使用"一、二、三"作为大标题编号，使用"**标题**"加粗格式
+5. **语言风格**：语言严谨、简洁、专业，避免口语化表达
+6. **实事求是**：完全基于转录文本，不要虚构信息；未明确的信息填写"未明确提及"
 
-## 会议主题
-[简要描述会议的主要议题，基于转录内容提炼]
+【输出格式】
+**会议时间**：[根据转录推断或填写"未明确提及"]
+**会议地点**：[如转录中提到，请列出；否则写"未明确提及"]
+**参会人员**：{speaker_list}
+**记录人**：AI助手
 
-## 主要议题
-1. [议题1 - 从转录中识别]
-2. [议题2 - 从转录中识别]
-3. [议题3 - 从转录中识别]
+---
 
-## 讨论要点
-[按议题分类列出讨论的主要内容，引用关键发言]
+**会议议题**：[一句话概括会议核心议题]
 
-### 议题1：[标题]
-- [说话人X]：[关键观点或发言摘要]
-- [说话人Y]：[回应或补充]
+---
 
-### 议题2：[标题]
-- [说话人X]：[关键观点]
-- ...
+**会议内容**：
 
-## 决议事项
-- [基于讨论内容总结的决议1]
-- [决议2]
+本次会议主要讨论了以下事项：
 
-## 待办事项
-- [ ] [负责人]：[具体任务] - [截止日期（如转录中提到）]
-- [ ] [负责人]：[具体任务]
+**一、[议题标题]**
 
-## 下次会议安排
-[如转录中提到下次会议计划，请列出时间和议题]
+[概括该议题的核心内容和讨论要点，提炼主要观点，如有重要发言请注明发言人]
 
-请确保：
-1. 内容完全基于转录文本，不要虚构信息
-2. 准确引用发言人的观点
-3. 保持专业、简洁、重点突出
-4. 如果转录中没有明确提到某个部分（如待办事项），可以标注"未明确讨论"
+**二、[议题标题]**
+
+[概括该议题的核心内容和讨论要点]
+
+**三、[议题标题]**
+
+[概括该议题的核心内容和讨论要点]
+
+---
+
+**会议决议**：
+
+一、[决议事项1]
+
+二、[决议事项2]
+
+三、[决议事项3]
+
+[如无明确决议，可写"本次会议未形成明确决议"]
+
+---
+
+**会议要求**：（仅当会议中有明确的待办事项、任务分配时才输出此部分，否则删除）
+
+一、[负责人/责任方]负责[具体事项]，于[时限]前完成。
+
+二、[负责人/责任方]负责[具体事项]，于[时限]前完成。
+
+---
 """
 
         return prompt
@@ -152,7 +169,7 @@ class LLMService:
                 "max_tokens": 2000
             }
 
-            response = requests.post(api_url, headers=headers, json=payload, timeout=60)
+            response = requests.post(api_url, headers=headers, json=payload, timeout=600)
             response.raise_for_status()
             response_data = response.json()
 
@@ -191,10 +208,7 @@ class LLMService:
         """Build prompt for meeting summary generation from timeline segments with transcripts."""
 
         # Build speaker info with speaking time
-        speaker_list = "\n".join([
-            f"- {s.display_name} ({s.speaker_id}) - 发言时长: {int(s.total_duration/60)}分{int(s.total_duration%60)}秒"
-            for s in speakers
-        ])
+        speaker_list = "、".join([s.display_name for s in speakers])
 
         # Use display_name from map if available, otherwise use speaker_id
         def get_speaker_display_name(speaker_id: str) -> str:
@@ -209,57 +223,76 @@ class LLMService:
         # Build timeline as text with actual transcripts
         # Format: [timestamp] 显示名称 (speaker_id): 发言内容
         timeline_text = "\n".join([
-            f"- [{self._format_timestamp(seg.start_time)}-{self._format_timestamp(seg.end_time)}] {get_speaker_display_name(seg.speaker_id)} ({seg.speaker_id}): {seg.transcript if seg.transcript else '(暂无转写文本)'}"
+            f"- [{self._format_timestamp(seg.start_time)}-{self._format_timestamp(seg.end_time)}] {get_speaker_display_name(seg.speaker_id)}: {seg.transcript if seg.transcript else '(暂无转写文本)'}"
             for seg in timeline
         ])
 
-        prompt = f"""请根据以下会议信息和完整发言记录生成一份会议纪要。
+        prompt = f"""你是专业的公文写作助手。请根据以下会议发言记录生成一份公文标准格式的会议纪要。
 
+【会议信息】
 会议标题：{meeting_title}
+参会人员：{speaker_list}
 
-参会人员：
-{speaker_list}
-
-发言记录（按时间顺序）：
+【发言记录（按时间顺序）】
 {timeline_text}
 
-请按照以下格式生成会议纪要（使用Markdown格式）：
+【写作要求】
+1. **内容提炼**：不要逐字逐句罗列发言记录，要对讨论进行提炼、归纳、总结
+2. **按议题组织**：根据讨论内容归纳出若干主要议题，每个议题下概括核心观点和讨论要点
+3. **引用发言**：重要观点可引用发言人并标注，如"张三指出：..."
+4. **公文格式**：使用"一、二、三"作为大标题编号，使用"**标题**"加粗格式
+5. **语言风格**：语言严谨、简洁、专业，避免口语化表达
+6. **实事求是**：完全基于发言记录，不要虚构信息；未明确的信息填写"未明确提及"
 
-## 会议主题
-[从讨论内容提炼会议主题]
+【输出格式】
+**会议时间**：[根据发言记录推断或填写"未明确提及"]
+**会议地点**：[如发言中提到，请列出；否则写"未明确提及"]
+**参会人员**：{speaker_list}
+**记录人**：AI助手
 
-## 参会人员
-{speaker_list}
+---
 
-## 主要议题
-[基于发言内容识别的主要议题，按重要性排序]
+**会议议题**：[一句话概括会议核心议题]
 
-## 讨论要点
-[按议题分类整理，引用关键发言]
+---
 
-### 议题1：[标题]
-- [说话人A]：[观点或发言摘要]
-- [说话人B]：[回应或补充]
+**会议内容**：
 
-### 议题2：[标题]
-- [说话人A]：[关键观点]
-- [说话人B]：[补充说明]
+本次会议主要讨论了以下事项：
 
-## 决议事项
-- [基于讨论内容总结的决议]
-- [达成的共识]
+**一、[议题标题]**
 
-## 待办事项
-- [ ] [负责人]：[具体任务] - [截止日期（如提到）]
+[概括该议题的核心内容和讨论要点，提炼主要观点，如有重要发言请注明发言人]
 
-## 下次会议安排
-[如提到下次会议，请列出时间和议题]
+**二、[议题标题]**
 
-请确保：
-1. 完全基于提供的发言记录内容生成纪要
-2. 准确引用和归纳发言人的观点
-3. 保持客观、简洁、重点突出
-4. 如果某些部分（如待办事项）没有明确提到，标注"未明确讨论"
+[概括该议题的核心内容和讨论要点]
+
+**三、[议题标题]**
+
+[概括该议题的核心内容和讨论要点]
+
+---
+
+**会议决议**：
+
+一、[决议事项1]
+
+二、[决议事项2]
+
+三、[决议事项3]
+
+[如无明确决议，可写"本次会议未形成明确决议"]
+
+---
+
+**会议要求**：（仅当会议中有明确的待办事项、任务分配时才输出此部分，否则删除）
+
+一、[负责人/责任方]负责[具体事项]，于[时限]前完成。
+
+二、[负责人/责任方]负责[具体事项]，于[时限]前完成。
+
+---
 """
 
         return prompt

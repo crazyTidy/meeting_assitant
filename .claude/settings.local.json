@@ -60,7 +60,8 @@
       "Bash(docker port:*)",
       "Bash(npm run:*)",
       "Bash(npx vue-tsc:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "Bash(lsof:*)"
     ]
   }
 }
