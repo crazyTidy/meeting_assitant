@@ -17,12 +17,14 @@ async def upgrade():
         result = await conn.execute(text("PRAGMA table_info(meetings)"))
         columns = [row[1] for row in result.fetchall()]
 
+        # Add mode column (without NOT NULL constraint for existing data)
         if 'mode' not in columns:
             print("Adding mode column...")
             await conn.execute(text(
-                "ALTER TABLE meetings ADD COLUMN mode VARCHAR(20) DEFAULT 'file_upload' NOT NULL"
+                "ALTER TABLE meetings ADD COLUMN mode VARCHAR(20) DEFAULT 'file_upload'"
             ))
 
+        # Add other columns
         if 'websocket_id' not in columns:
             print("Adding websocket_id column...")
             await conn.execute(text(
@@ -40,6 +42,13 @@ async def upgrade():
             await conn.execute(text(
                 "ALTER TABLE meetings ADD COLUMN ended_at TIMESTAMP"
             ))
+
+        # Update any NULL mode values
+        result = await conn.execute(text(
+            "UPDATE meetings SET mode = 'file_upload' WHERE mode IS NULL"
+        ))
+        if result.rowcount > 0:
+            print(f"Updated {result.rowcount} meetings with default mode")
 
     print("Migration completed successfully!")
 
