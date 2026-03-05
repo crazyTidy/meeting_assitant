@@ -9,6 +9,8 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.v1.router import api_router
+from app.middleware.dev_auth import dev_auth_middleware
+from app.middleware.auth import auth_middleware
 
 
 def setup_logging():
@@ -71,6 +73,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Development mode authentication (for testing)
+if settings.DEV_MODE:
+    app.middleware("http")(dev_auth_middleware)
+else:
+    # Production JWT authentication
+    app.middleware("http")(auth_middleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)

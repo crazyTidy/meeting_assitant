@@ -8,6 +8,7 @@ from app.models.meeting import Meeting, MeetingStatus, ProcessingStage
 from app.models.participant import Participant
 from app.models.summary import Summary
 from app.models.speaker_segment import SpeakerSegment
+from app.models.user import User
 
 
 class MeetingRepository:
@@ -18,14 +19,16 @@ class MeetingRepository:
         db: AsyncSession,
         title: str,
         audio_path: str,
-        duration: Optional[int] = None
+        duration: Optional[int] = None,
+        creator_id: Optional[str] = None
     ) -> Meeting:
         """Create a new meeting."""
         meeting = Meeting(
             title=title,
             audio_path=audio_path,
             status=MeetingStatus.PENDING,
-            duration=duration
+            duration=duration,
+            creator_id=creator_id
         )
         db.add(meeting)
         await db.flush()
@@ -52,6 +55,7 @@ class MeetingRepository:
         result = await db.execute(
             select(Meeting)
             .options(
+                selectinload(Meeting.creator),
                 selectinload(Meeting.participants),
                 selectinload(Meeting.speaker_segments),
                 selectinload(Meeting.merged_segments),
@@ -66,7 +70,8 @@ class MeetingRepository:
         db: AsyncSession,
         search: Optional[str] = None,
         page: int = 1,
-        size: int = 10
+        size: int = 10,
+        creator_id: Optional[str] = None
     ) -> Tuple[List[Meeting], int]:
         """Get paginated list of meetings."""
         query = select(Meeting)
@@ -76,6 +81,10 @@ class MeetingRepository:
             query = query.where(
                 Meeting.title.ilike(f"%{search}%")
             )
+
+        # Filter by creator
+        if creator_id:
+            query = query.where(Meeting.creator_id == creator_id)
 
         # Count total
         count_query = select(func.count()).select_from(

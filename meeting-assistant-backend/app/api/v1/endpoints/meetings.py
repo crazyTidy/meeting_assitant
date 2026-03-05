@@ -1,14 +1,16 @@
 """Meeting API endpoints."""
 from typing import Optional
 from pathlib import Path
+import logging
 from urllib.parse import quote
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.security import get_current_user
 from app.schemas.meeting import (
     MeetingResponse,
     MeetingDetailResponse,
@@ -17,6 +19,7 @@ from app.schemas.meeting import (
     ErrorResponse
 )
 from app.services.meeting_service import meeting_service, summary_service, regenerate_service
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,6 +42,7 @@ async def create_meeting(
     background_tasks: BackgroundTasks,
     title: str = Form(..., min_length=1, max_length=255),
     audio: UploadFile = File(...),
+    request: Request = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -51,11 +55,16 @@ async def create_meeting(
     Processing starts automatically in the background.
     """
     try:
+        # Get current user from request.state
+        current_user = get_current_user(request)
+        creator_id = current_user.get("user_id") if current_user else None
+
         meeting = await meeting_service.create_meeting(
             db=db,
             title=title,
             audio_file=audio,
-            background_tasks=background_tasks
+            background_tasks=background_tasks,
+            creator_id=creator_id
         )
         return meeting
     except ValueError as e:
@@ -73,6 +82,8 @@ async def list_meetings(
     search: Optional[str] = None,
     page: int = 1,
     size: int = 10,
+    creator_id: Optional[str] = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -81,6 +92,7 @@ async def list_meetings(
     - **search**: Search by meeting title (optional)
     - **page**: Page number (default: 1)
     - **size**: Items per page (default: 10, max: 100)
+    - **creator_id**: Filter by creator user ID (optional)
     """
     if page < 1:
         page = 1
@@ -89,11 +101,18 @@ async def list_meetings(
     if size > 100:
         size = 100
 
+    # If no creator_id specified, filter by current user
+    if not creator_id:
+        current_user = get_current_user(request)
+        if current_user:
+            creator_id = current_user.get("user_id")
+
     return await meeting_service.get_meeting_list(
         db=db,
         search=search,
         page=page,
-        size=size
+        size=size,
+        creator_id=creator_id
     )
 
 
@@ -303,3 +322,71 @@ async def regenerate_summary(
         )
 
     return result
+
+
+@router.get(
+    "/{meeting_id}/download-docx",
+    responses={
+        404: {"model": ErrorResponse, "description": "Meeting or summary not found"}
+    }
+)
+async def download_docx(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Download meeting summary as DOCX file.
+
+    Generates a DOCX file following Chinese official document standards:
+    - A4 paper, 2.54cm margins
+    - Font: 仿宋_GB2312 for body, 黑体 for titles, 楷体GB2312 for level-2 headings
+    - Font size: 三号 (16pt)
+    - Line spacing: 28pt
+
+    - **meeting_id**: Meeting UUID
+    """
+    from app.utils.docx_generator import generate_meeting_minutes_docx
+    from fastapi.responses import Response
+    from pathlib import Path
+    from urllib.parse import quote
+
+    # Get meeting with summary
+    meeting = await meeting_service.get_meeting(db, meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
+        )
+
+    if not meeting.summary or not meeting.summary.content:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "SUMMARY_NOT_FOUND", "message": "会议纪要不存在"}}
+        )
+
+    # Generate DOCX
+    try:
+        docx_bytes = generate_meeting_minutes_docx(
+            meeting_title=meeting.title,
+            content=meeting.summary.content
+        )
+
+        # Create filename
+        safe_title = "".join(c for c in meeting.title if c.isalnum() or c in (' ', '-', '_')).strip()
+        filename = f"{safe_title}_会议纪要.docx"
+        encoded_filename = quote(filename)
+
+        # Return file response
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+    except Exception as e:
+        logger.error(f"[DOCX] Failed to generate document: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": {"code": "DOCX_GENERATION_FAILED", "message": "文档生成失败"}}
+        )

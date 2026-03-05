@@ -66,9 +66,30 @@ async def regenerate_summary_task(meeting_id: str):
             )
             await db.commit()
 
+            logger.info(
+                f"[REGENERATE][{meeting_id}] Processing {len(meeting.participants)} participants"
+            )
+
+            # Build old speaker name map (default display names)
+            # Default format is "说话人 1", "说话人 2", etc.
+            old_name_map = {}
+            for participant in meeting.participants:
+                if participant.speaker_id.startswith("speaker_"):
+                    try:
+                        speaker_num = participant.speaker_id.split('_')[1]
+                        old_name_map[participant.speaker_id] = f"说话人 {speaker_num}"
+                    except (IndexError, ValueError):
+                        # If speaker_id format is unexpected, skip
+                        pass
+
+            logger.info(
+                f"[REGENERATE][{meeting_id}] Old name map: {old_name_map}"
+            )
+
             # Build speaker info from participants
             speakers: List[SpeakerInfo] = []
             speaker_name_map = {}
+
             for participant in meeting.participants:
                 # Calculate total speaking duration from merged segments
                 total_duration = sum(
@@ -76,17 +97,27 @@ async def regenerate_summary_task(meeting_id: str):
                     if seg.speaker_id == participant.speaker_id
                 )
 
-                # Build segments list for this speaker
-                speaker_segments = [
-                    SpeakerSegment(
-                        speaker_id=seg.speaker_id,
-                        start_time=seg.start_time,
-                        end_time=seg.end_time,
-                        transcript=seg.transcript
-                    )
-                    for seg in meeting.merged_segments
-                    if seg.speaker_id == participant.speaker_id
-                ]
+                # Get old and new names for this speaker
+                new_name = participant.display_name
+                old_name = old_name_map.get(participant.speaker_id, "")
+
+                # Build segments list for this speaker with name replacement
+                speaker_segments = []
+                for seg in meeting.merged_segments:
+                    if seg.speaker_id == participant.speaker_id:
+                        # Apply name replacement to transcript
+                        transcript = seg.transcript or ""
+                        if old_name and new_name and old_name != new_name:
+                            transcript = transcript.replace(old_name, new_name)
+
+                        speaker_segments.append(
+                            SpeakerSegment(
+                                speaker_id=seg.speaker_id,
+                                start_time=seg.start_time,
+                                end_time=seg.end_time,
+                                transcript=transcript
+                            )
+                        )
 
                 speakers.append(SpeakerInfo(
                     speaker_id=participant.speaker_id,
@@ -101,16 +132,30 @@ async def regenerate_summary_task(meeting_id: str):
             )
 
             # Build timeline from merged segments for LLM
+            # Apply name replacement to transcripts (same logic as in speakers above)
             timeline_for_llm: List[SpeakerSegment] = []
             for merged_seg in meeting.merged_segments:
+                # Get transcript and replace old name with new name
+                transcript = merged_seg.transcript or ""
+                old_name = old_name_map.get(merged_seg.speaker_id, "")
+                new_name = speaker_name_map.get(merged_seg.speaker_id, "")
+
+                # Replace old name with new name in transcript
+                if old_name and new_name and old_name != new_name:
+                    transcript = transcript.replace(old_name, new_name)
+
                 timeline_for_llm.append(
                     SpeakerSegment(
                         speaker_id=merged_seg.speaker_id,
                         start_time=merged_seg.start_time,
                         end_time=merged_seg.end_time,
-                        transcript=merged_seg.transcript
+                        transcript=transcript
                     )
                 )
+
+            logger.info(
+                f"[REGENERATE][{meeting_id}] Built timeline with {len(timeline_for_llm)} segments"
+            )
 
             # Update progress
             await meeting_repository.update_stage(

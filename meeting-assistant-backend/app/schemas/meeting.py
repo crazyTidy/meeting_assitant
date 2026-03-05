@@ -4,6 +4,13 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from app.models.meeting import MeetingStatus, ProcessingStage
+from app.schemas.user import UserInfo
+
+
+# Creator Info Schema
+class CreatorInfo(UserInfo):
+    """Schema for creator information."""
+    pass
 
 
 # Participant Schemas
@@ -95,6 +102,7 @@ class MeetingResponse(BaseModel):
     progress: int
     stage: Optional[ProcessingStage] = None
     duration: Optional[float] = None
+    creator_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -104,6 +112,7 @@ class MeetingResponse(BaseModel):
 
 class MeetingDetailResponse(MeetingResponse):
     """Schema for detailed meeting response."""
+    creator: Optional[CreatorInfo] = None
     participants: List[ParticipantResponse] = []
     speaker_segments: List[SpeakerSegmentResponse] = []
     merged_segments: List[MergedSegmentResponse] = []

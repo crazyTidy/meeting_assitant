@@ -11,14 +11,6 @@ marked.setOptions({
 })
 
 import type { MeetingStatus } from '@/types'
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  AlignmentType,
-  convertMillimetersToTwip
-} from 'docx'
 import { saveAs } from 'file-saver'
 
 const route = useRoute()
@@ -30,6 +22,20 @@ const meetingId = computed(() => route.params.id as string)
 const editingSpeaker = ref<string | null>(null)
 const editingSpeakerName = ref('')
 const savingSpeakerName = ref(false)
+
+// Summary editing states
+const editingSummary = ref(false)
+const editedContent = ref('')
+const savingSummary = ref(false)
+
+// Download state
+const downloading = ref(false)
+
+// Regeneration states
+const regeneratingSummary = ref(false)
+const showRegenerateConfirm = ref(false)
+const showPreviewDialog = ref(false)
+const previewContent = ref('')
 
 const statusConfig: Record<MeetingStatus, { label: string; color: string; bgColor: string }> = {
   pending: { label: '等待处理', color: 'text-espresso-500', bgColor: 'bg-espresso-100' },
@@ -233,6 +239,33 @@ const copySummary = async () => {
   }
 }
 
+// Summary editing functions
+const startEditingSummary = () => {
+  if (store.currentMeeting?.summary?.content) {
+    editedContent.value = store.currentMeeting.summary.content
+    editingSummary.value = true
+  }
+}
+
+const saveSummary = async () => {
+  if (!editedContent.value.trim()) return
+
+  savingSummary.value = true
+  try {
+    await store.updateSummary(meetingId.value, editedContent.value.trim())
+    editingSummary.value = false
+  } catch (e) {
+    // Error handled by store
+  } finally {
+    savingSummary.value = false
+  }
+}
+
+const cancelEditingSummary = () => {
+  editingSummary.value = false
+  editedContent.value = ''
+}
+
 /**
  * Parse markdown and convert to docx paragraphs following 科大讯飞 format
  * 科大讯飞格式：
@@ -243,339 +276,47 @@ const copySummary = async () => {
  * - 正文：三号仿宋，首行缩进2字符
  * - 段落间距：240缇（12磅）
  */
-const parseMarkdownToDocx = (markdown: string): Paragraph[] => {
-  const lines = markdown.split('\n')
-  const paragraphs: Paragraph[] = []
-
-  // 科大讯飞格式：行距固定值，段落间距240缇
-  const titleSpacing = {
-    line: 480,
-    before: 0,
-    after: 280
-  }
-
-  const contentSpacing = {
-    line: 480,
-    before: 240,
-    after: 240
-  }
-
-  for (const line of lines) {
-    const trimmedLine = line.trim()
-
-    // Empty line
-    if (trimmedLine === '') {
-      paragraphs.push(new Paragraph({
-        text: '',
-        spacing: contentSpacing
-      }))
-      continue
-    }
-
-    // # 主标题（文件名）- 二号黑体居中
-    if (trimmedLine.startsWith('# ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine.substring(2),
-            font: '黑体',
-            size: 44, // 二号=22磅
-            bold: true
-          })
-        ],
-        spacing: titleSpacing,
-        alignment: AlignmentType.CENTER
-      }))
-    }
-    // ## 副标题"会议纪要" - 三号仿宋居中
-    else if (trimmedLine.startsWith('## ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine.substring(3),
-            font: '仿宋',
-            size: 32 // 三号=16磅
-          })
-        ],
-        spacing: contentSpacing,
-        alignment: AlignmentType.CENTER
-      }))
-    }
-    // ### 大标题"一、二、三" - 三号黑体加粗
-    else if (trimmedLine.startsWith('### ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine.substring(4),
-            font: '黑体',
-            size: 32, // 三号=16磅
-            bold: true
-          })
-        ],
-        spacing: {
-          line: 480,
-          before: 360,
-          after: 180
-        },
-        indent: { left: 0 }
-      }))
-    }
-    // 子标题"**1. **"或"1." - 三号黑体（不加粗）
-    else if (/^\*\*(\d+\.\s)/.test(trimmedLine)) {
-      const match = trimmedLine.match(/^\*\*(\d+\.\s)(.*)\*\*/)
-      if (match) {
-        const [, num, content = ''] = match
-        paragraphs.push(new Paragraph({
-          children: [
-            new TextRun({
-              text: num + content,
-              font: '黑体',
-              size: 32 // 三号
-            })
-          ],
-          spacing: contentSpacing,
-          indent: { left: 0 }
-        }))
-      }
-    }
-    // Numbered list without bold (1. 2. 3.) - 三号黑体
-    else if (/^\d+\.\s/.test(trimmedLine)) {
-      const match = trimmedLine.match(/^(\d+\.\s)(.*)/)
-      if (match) {
-        const [, num, content = ''] = match
-        paragraphs.push(new Paragraph({
-          children: [
-            new TextRun({
-              text: num,
-              font: '黑体',
-              size: 32
-            }),
-            ...parseInlineFormatting(content)
-          ],
-          spacing: contentSpacing,
-          indent: { left: 0 }
-        }))
-      }
-    }
-    // Table "| 事项 | 责任人 | 时限 |" - 用文本格式表示
-    else if (trimmedLine.startsWith('|') && trimmedLine.endsWith('|')) {
-      // 简化处理：用文本表示表格
-      const cells = trimmedLine.split('|').filter(c => c.trim())
-      if (cells.length >= 3) {
-        // 用空格分隔的文本表示表格行
-        const tableText = cells.join('  |  ')
-        paragraphs.push(new Paragraph({
-          children: [new TextRun({
-            text: tableText,
-            font: '仿宋',
-            size: 32,
-            bold: true
-          })],
-          spacing: contentSpacing
-        }))
-      }
-    }
-    // Bullet points (- *) - 三号仿宋，首行缩进
-    else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: trimmedLine[0] + ' ',
-            font: '仿宋',
-            size: 32
-          }),
-          ...parseInlineFormatting(trimmedLine.substring(2))
-        ],
-        spacing: contentSpacing,
-        indent: {
-          left: 240, // 首行缩进2字符
-          hanging: 0
-        }
-      }))
-    }
-    // Regular paragraph - 三号仿宋，首行缩进2字符
-    else {
-      const children = parseInlineFormatting(trimmedLine)
-
-      if (children.length === 0) {
-        children.push(new TextRun({
-          text: trimmedLine,
-          font: '仿宋',
-          size: 32
-        }))
-      }
-
-      paragraphs.push(new Paragraph({
-        children,
-        spacing: contentSpacing,
-        indent: {
-          left: 240, // 首行缩进2字符
-          hanging: 0
-        }
-      }))
-    }
-  }
-
-  return paragraphs
-}
 
 /**
- * Parse inline formatting (bold, italic) in text
- */
-const parseInlineFormatting = (text: string): TextRun[] => {
-  if (!text) return []
-
-  const children: TextRun[] = []
-
-  // Handle bold text **text**
-  const boldRegex = /\*\*(.*?)\*\*/g
-  let lastIndex = 0
-  let match
-
-  while ((match = boldRegex.exec(text)) !== null) {
-    // Add text before bold
-    if (match.index > lastIndex) {
-      const beforeText = text.substring(lastIndex, match.index)
-      children.push(new TextRun({
-        text: beforeText,
-        font: '仿宋',
-        size: 32
-      }))
-    }
-    // Add bold text
-    children.push(new TextRun({
-      text: match[1],
-      font: '仿宋',
-      size: 32,
-      bold: true
-    }))
-    lastIndex = match.index + match[0].length
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    children.push(new TextRun({
-      text: text.substring(lastIndex),
-      font: '仿宋',
-      size: 32
-    }))
-  }
-
-  return children.length > 0 ? children : [new TextRun({
-    text: text,
-    font: '仿宋',
-    size: 32
-  })]
-}
-
-// Download summary as docx
-const downloading = ref(false)
-
-// Edit summary state
-const editingSummary = ref(false)
-const editedContent = ref('')
-const savingSummary = ref(false)
-
-// Regenerate summary state
-const showRegenerateConfirm = ref(false)
-const regeneratingSummary = ref(false)
-const previewContent = ref('')
-const showPreviewDialog = ref(false)
-
-const startEditingSummary = () => {
-  if (store.currentMeeting?.summary?.content) {
-    editedContent.value = store.currentMeeting.summary.content
-    editingSummary.value = true
-  }
-}
-
-const cancelEditingSummary = () => {
-  editingSummary.value = false
-  editedContent.value = ''
-}
-
-const saveSummary = async () => {
-  if (!editedContent.value.trim()) {
-    return
-  }
-
-  savingSummary.value = true
-  try {
-    console.log('Saving summary...', meetingId.value, editedContent.value.substring(0, 50))
-    await store.updateSummary(meetingId.value, editedContent.value)
-    console.log('Summary saved successfully')
-    editingSummary.value = false
-    editedContent.value = ''
-  } catch (e: any) {
-    console.error('Failed to save summary:', e)
-    // Show error to user
-    alert(`保存失败：${e.message || '未知错误'}`)
-  } finally {
-    savingSummary.value = false
-  }
-}
-
-/**
- * Download as DOCX following GB/T 9704-2012 official document format
+ * Download as DOCX via backend API
+ * Backend generates DOCX following Chinese official document standards
  */
 const downloadAsDocx = async () => {
   if (!store.currentMeeting?.summary?.content) return
 
   downloading.value = true
   try {
-    const markdownContent = store.currentMeeting.summary.content
-    const paragraphs = parseMarkdownToDocx(markdownContent)
+    // Call backend API to generate DOCX (using proxy path configured in vite.config.ts)
+    const response = await fetch(`/api/v1/meetings/${meetingId.value}/download-docx`)
 
-    // 公文标题 - "[会议名称]会议纪要"（标准公文格式）
-    const titleParagraph = new Paragraph({
-      children: [
-        new TextRun({
-          text: `${store.currentMeeting.title}会议纪要`,
-          font: '小标宋简体',
-          size: 44, // 22磅 = 22*2缇 = 44半磅
-          bold: false // 小标宋本身就是粗体效果
-        })
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: {
-        line: 560, // 28磅行距
-        before: 0,
-        after: 240  // 标题后空1行
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData?.error?.message || '下载失败')
+    }
+
+    // Get blob from response
+    const blob = await response.blob()
+
+    // Extract filename from Content-Disposition header or generate default
+    let fileName = `${store.currentMeeting.title}_会议纪要.docx`
+    const contentDisposition = response.headers.get('Content-Disposition')
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename\*=UTF-8''(.+)/)
+      if (filenameMatch) {
+        fileName = decodeURIComponent(filenameMatch[1])
       }
-    })
+    }
 
-    // 创建文档 - GB/T 9704-2012 公文格式页面设置
-    // A4纸：上边距3.7cm，下边距3.5cm，左边距2.8cm，右边距2.6cm
-    const doc = new Document({
-      sections: [{
-        properties: {
-          page: {
-            margin: {
-              top: convertMillimetersToTwip(37),   // 3.7cm
-              bottom: convertMillimetersToTwip(35), // 3.5cm
-              left: convertMillimetersToTwip(28),   // 2.8cm
-              right: convertMillimetersToTwip(26)   // 2.6cm
-            }
-          }
-        },
-        children: [titleParagraph, ...paragraphs]
-      }]
-    })
-
-    const blob = await Packer.toBlob(doc)
-    // 清理文件名中的特殊字符
-    const safeTitle = store.currentMeeting.title.replace(/[\\/:*?"<>|]/g, '_')
-    const fileName = `${safeTitle}_会议纪要.docx`
+    // Download file
     saveAs(blob, fileName)
-  } catch (err) {
+  } catch (err: any) {
     console.error('Failed to download:', err)
-    alert('下载失败，请重试')
+    alert(`下载失败：${err.message || '未知错误'}`)
   } finally {
     downloading.value = false
   }
 }
 
-// Regenerate summary functions
 const confirmRegenerate = () => {
   showRegenerateConfirm.value = true
 }

@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     ALLOWED_AUDIO_EXTENSIONS: set = {".mp3", ".wav", ".m4a", ".flac", ".ogg"}
 
     # External APIs
-    ZHIPU_API_KEY: str = "dc27759f5b5a4107b6af67aaf60e4a23.DmhTXSW9nk0eL74y"
+    ZHIPU_API_KEY: str = "bd0265bc4e17414da4fbfa64ed303a46.2pUrRsJ5sQhpTHAY"
     SEPARATION_API_KEY: str = ""
     # SEPARATION_API_URL: str = "http://192.168.0.101:40150/recognize"  # Example local URL
     SEPARATION_API_URL: str = "http://192.168.0.100:40901/recognize"  # Example local URL
@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # Task Processing
     TASK_RETRY_COUNT: int = 3
     TASK_POLLING_INTERVAL: int = 3  # seconds
+
+    # JWT Configuration
+    JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
+    # Development Mode
+    DEV_MODE: bool = False
+    DEV_USER_ID: str = "dev-user-001"
+    DEV_USERNAME: str = "dev_user"
+    DEV_REAL_NAME: str = "开发测试用户"
 
     class Config:
         env_file = ".env"

@@ -71,7 +71,8 @@ class MeetingService:
         db: AsyncSession,
         title: str,
         audio_file: UploadFile,
-        background_tasks: BackgroundTasks
+        background_tasks: BackgroundTasks,
+        creator_id: Optional[str] = None
     ) -> Meeting:
         """Create a meeting and start processing."""
         # Validate file extension
@@ -102,7 +103,8 @@ class MeetingService:
             db=db,
             title=title,
             audio_path=str(file_path),
-            duration=duration
+            duration=duration,
+            creator_id=creator_id
         )
 
         # Commit immediately so background task can find the meeting
@@ -130,14 +132,16 @@ class MeetingService:
         db: AsyncSession,
         search: Optional[str] = None,
         page: int = 1,
-        size: int = 10
+        size: int = 10,
+        creator_id: Optional[str] = None
     ) -> MeetingListResponse:
         """Get paginated meeting list."""
         meetings, total = await self.repository.get_list(
             db=db,
             search=search,
             page=page,
-            size=size
+            size=size,
+            creator_id=creator_id
         )
 
         pages = (total + size - 1) // size if total > 0 else 0

@@ -61,7 +61,18 @@
       "Bash(npm run:*)",
       "Bash(npx vue-tsc:*)",
       "Bash(ping:*)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "Bash(\"C:\\\\Users\\\\JK-T-002\\\\Desktop\\\\wuguipeng\\\\meetting_assitant\\\\update_docx_format.py\":*)",
+      "Bash(sed:*)",
+      "Bash(ls:*)",
+      "Bash(PYTHONPATH=. python:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(bash:*)",
+      "Bash(netstat:*)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)",
+      "Bash(PYTHONPATH=/c/Users/JK-T-002/Desktop/wuguipeng/meetting_assistant/meeting-assistant-backend python:*)"
     ]
   }
 }

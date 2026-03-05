@@ -55,6 +55,15 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
+async def get_db_session():
+    """Get a database session for direct use."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+
 async def init_db():
     """Initialize database tables."""
     logger.info("Initializing database tables...")

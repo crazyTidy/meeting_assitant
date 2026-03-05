@@ -1,7 +1,7 @@
 """Meeting database model."""
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Text, Enum,Float
+from sqlalchemy import Column, String, DateTime, Integer, Text, Enum, Float, ForeignKey
 from sqlalchemy.orm import relationship
 import enum
 
@@ -39,6 +39,12 @@ class Meeting(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(255), nullable=False)
     audio_path = Column(String(512), nullable=False)
+    creator_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="创建者ID"
+    )
     status = Column(
         Enum(MeetingStatus),
         default=MeetingStatus.PENDING,
@@ -61,6 +67,11 @@ class Meeting(Base):
     )
 
     # Relationships
+    creator = relationship(
+        "User",
+        back_populates="created_meetings",
+        foreign_keys=[creator_id]
+    )
     participants = relationship(
         "Participant",
         back_populates="meeting",

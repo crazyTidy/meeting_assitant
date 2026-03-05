@@ -1,9 +1,24 @@
 <script setup lang="ts">
 import { RouterView, RouterLink, useRoute } from 'vue-router'
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
+const userStore = useUserStore()
+
 const isDetailPage = computed(() => route.name === 'MeetingDetail')
+const userName = computed(() => userStore.userName)
+const userDepartment = computed(() => userStore.userDepartment)
+const isLoggedIn = computed(() => userStore.isLoggedIn)
+
+async function handleLogout() {
+  await userStore.logout()
+  // Router will redirect to login automatically due to navigation guard
+}
+
+onMounted(async () => {
+  await userStore.initUser()
+})
 </script>
 
 <template>
@@ -29,31 +44,71 @@ const isDetailPage = computed(() => route.name === 'MeetingDetail')
         </RouterLink>
 
         <!-- Navigation -->
-        <nav class="flex items-center gap-2" v-if="!isDetailPage">
-          <RouterLink
-            to="/meetings"
-            class="btn-ghost"
-            :class="{ 'bg-cream-200': route.name === 'MeetingList' }"
-          >
-            会议列表
-          </RouterLink>
-          <RouterLink to="/upload" class="btn-primary">
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 4v16m8-8H4" />
-            </svg>
-            新建会议
-          </RouterLink>
+        <nav class="flex items-center gap-4" v-if="!isDetailPage">
+          <div class="flex items-center gap-2">
+            <RouterLink
+              to="/meetings"
+              class="btn-ghost"
+              :class="{ 'bg-cream-200': route.name === 'MeetingList' }"
+            >
+              会议列表
+            </RouterLink>
+            <RouterLink to="/upload" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 4v16m8-8H4" />
+              </svg>
+              新建会议
+            </RouterLink>
+          </div>
+
+          <!-- User Info -->
+          <div v-if="isLoggedIn" class="flex items-center gap-3 pl-4 border-l border-cream-300">
+            <div class="text-right">
+              <p class="text-sm font-medium text-espresso-800">{{ userName }}</p>
+              <p v-if="userDepartment" class="text-xs text-espresso-500">{{ userDepartment }}</p>
+            </div>
+            <button
+              @click="handleLogout"
+              class="p-2 rounded-lg hover:bg-cream-200 transition-colors"
+              title="退出登录"
+            >
+              <svg class="w-5 h-5 text-espresso-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          </div>
         </nav>
 
         <!-- Back button for detail page -->
-        <RouterLink v-else to="/meetings" class="btn-ghost">
-          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          返回列表
-        </RouterLink>
+        <div v-else class="flex items-center gap-4">
+          <RouterLink to="/meetings" class="btn-ghost">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            返回列表
+          </RouterLink>
+
+          <!-- User Info on detail page -->
+          <div v-if="isLoggedIn" class="flex items-center gap-3 pl-4 border-l border-cream-300">
+            <div class="text-right">
+              <p class="text-sm font-medium text-espresso-800">{{ userName }}</p>
+              <p v-if="userDepartment" class="text-xs text-espresso-500">{{ userDepartment }}</p>
+            </div>
+            <button
+              @click="handleLogout"
+              class="p-2 rounded-lg hover:bg-cream-200 transition-colors"
+              title="退出登录"
+            >
+              <svg class="w-5 h-5 text-espresso-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 

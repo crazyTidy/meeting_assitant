@@ -101,3 +101,29 @@ export interface ApiError {
 export interface ParticipantUpdateRequest {
   display_name: string
 }
+
+// User
+export interface User {
+  id: string
+  username: string
+  real_name: string
+  email?: string
+  phone?: string
+  department_id?: string
+  department_name?: string
+  position?: string
+  last_seen_at?: string
+}
+
+// Login request
+export interface LoginRequest {
+  token?: string
+  dev_mode?: boolean
+}
+
+// Login response
+export interface LoginResponse {
+  access_token?: string
+  token_type?: string
+  user?: User
+}

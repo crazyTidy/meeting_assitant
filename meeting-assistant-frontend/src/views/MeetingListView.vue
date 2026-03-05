@@ -323,12 +323,12 @@ watch(searchInput, handleSearch)
                 <!-- Delete Confirmation Popover -->
                 <div
                   v-if="deleteConfirmId === meeting.id"
-                  class="absolute right-0 top-full mt-2 p-4 bg-cream-50 rounded-lg shadow-paper-hover z-10 min-w-[200px]"
+                  class="absolute right-0 bottom-full mb-1 p-2 bg-cream-50 rounded shadow-lg z-[999] w-32 border border-espresso-200"
                 >
-                  <p class="text-sm text-espresso-600 mb-3 font-sans">确定删除此会议？</p>
-                  <div class="flex gap-2">
-                    <button @click="cancelDelete" class="btn-ghost flex-1 text-xs">取消</button>
-                    <button @click="handleDelete(meeting.id)" class="btn-primary flex-1 text-xs bg-accent-terracotta hover:bg-accent-terracotta/90">删除</button>
+                  <p class="text-xs text-espresso-600 mb-2 font-sans leading-tight">确定删除？</p>
+                  <div class="flex gap-1">
+                    <button @click="cancelDelete" class="btn-ghost flex-1 text-xs py-0.5 px-1">取消</button>
+                    <button @click="handleDelete(meeting.id)" class="btn-primary flex-1 text-xs py-0.5 px-1 bg-accent-terracotta hover:bg-accent-terracotta/90">删除</button>
                   </div>
                 </div>
               </div>
