@@ -23,6 +23,12 @@ const editingSpeaker = ref<string | null>(null)
 const editingSpeakerName = ref('')
 const savingSpeakerName = ref(false)
 
+// Batch replace
+const showBatchReplace = ref(false)
+const findText = ref('')
+const replaceText = ref('')
+const replacingText = ref(false)
+
 // Summary editing states
 const editingSummary = ref(false)
 const editedContent = ref('')
@@ -132,6 +138,51 @@ const handleSpeakerKeydown = (e: KeyboardEvent, speakerId: string) => {
     saveSpeakerName(speakerId)
   } else if (e.key === 'Escape') {
     cancelEditingSpeaker()
+  }
+}
+
+// Batch replace functions
+const openBatchReplace = () => {
+  showBatchReplace.value = true
+  findText.value = ''
+  replaceText.value = ''
+}
+
+const closeBatchReplace = () => {
+  showBatchReplace.value = false
+  findText.value = ''
+  replaceText.value = ''
+}
+
+const highlightText = (text: string): string => {
+  if (!findText.value.trim() || !text) return text
+  const regex = new RegExp(`(${findText.value})`, 'gi')
+  return text.replace(regex, '<mark class="bg-yellow-200">$1</mark>')
+}
+
+const executeBatchReplace = async () => {
+  if (!findText.value.trim()) return
+
+  const segmentsToUpdate = timelineData.value
+    .filter(s => s.transcript && s.transcript.includes(findText.value))
+    .map(s => ({
+      id: s.id,
+      transcript: s.transcript!.replace(new RegExp(findText.value, 'g'), replaceText.value)
+    }))
+
+  if (segmentsToUpdate.length === 0) {
+    alert('未找到匹配的文本')
+    return
+  }
+
+  replacingText.value = true
+  try {
+    await store.batchUpdateTranscripts(meetingId.value, segmentsToUpdate)
+    closeBatchReplace()
+  } catch (e) {
+    // Error handled by store
+  } finally {
+    replacingText.value = false
   }
 }
 
@@ -463,9 +514,22 @@ const cancelPreview = () => {
             <div class="p-6 sticky top-20 max-h-[calc(100vh-200px)] overflow-y-auto">
               <div class="flex items-center justify-between mb-6">
                 <h2 class="font-display text-xl text-espresso-700">逐字稿</h2>
-                <span v-if="timelineData.length > 0" class="text-sm text-espresso-400 font-sans">
-                  {{ timelineData.length }} 条
-                </span>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="timelineData.length > 0"
+                    @click="openBatchReplace"
+                    class="px-2 py-1 text-xs font-sans rounded-lg border border-cream-300 bg-white text-espresso-600 hover:border-espresso-400 hover:bg-cream-50 transition-all"
+                    title="批量替换文本"
+                  >
+                    <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                    批量替换
+                  </button>
+                  <span v-if="timelineData.length > 0" class="text-sm text-espresso-400 font-sans">
+                    {{ timelineData.length }} 条
+                  </span>
+                </div>
               </div>
 
               <div v-if="timelineData.length > 0" class="space-y-3 animate-fade-up">
@@ -543,9 +607,10 @@ const cancelPreview = () => {
                         </div>
                       </div>
 
-                      <p v-if="segment.transcript" class="text-sm text-espresso-700 font-sans leading-relaxed">
+                      <p v-if="segment.transcript && !showBatchReplace" class="text-sm text-espresso-700 font-sans leading-relaxed">
                         {{ segment.transcript }}
                       </p>
+                      <p v-else-if="segment.transcript && showBatchReplace" class="text-sm text-espresso-700 font-sans leading-relaxed" v-html="highlightText(segment.transcript)"></p>
                       <p v-else class="text-sm text-espresso-400 font-sans italic">
                         （暂无转写文本）
                       </p>
@@ -853,6 +918,58 @@ const cancelPreview = () => {
             确定
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Replace Dialog -->
+  <div
+    v-if="showBatchReplace"
+    class="fixed top-24 left-6 z-50 pointer-events-none"
+  >
+    <div class="bg-white rounded-xl shadow-2xl p-4 w-80 animate-slide-up pointer-events-auto">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-display text-base text-espresso-700">批量替换</h3>
+        <button @click="closeBatchReplace" class="text-espresso-400 hover:text-espresso-600">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-sans text-espresso-600 mb-1">查找文本</label>
+          <input
+            v-model="findText"
+            type="text"
+            class="w-full px-2 py-1.5 text-sm border border-cream-300 rounded-lg font-sans focus:outline-none focus:border-espresso-500"
+            placeholder="输入要查找的文本"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-sans text-espresso-600 mb-1">替换为</label>
+          <input
+            v-model="replaceText"
+            type="text"
+            class="w-full px-2 py-1.5 text-sm border border-cream-300 rounded-lg font-sans focus:outline-none focus:border-espresso-500"
+            placeholder="输入替换后的文本"
+          />
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button
+          @click="closeBatchReplace"
+          class="px-3 py-1.5 text-xs font-sans rounded-lg border border-cream-300 bg-white text-espresso-600 hover:border-espresso-400 hover:bg-cream-50 transition-all"
+        >
+          取消
+        </button>
+        <button
+          @click="executeBatchReplace"
+          :disabled="!findText.trim() || replacingText"
+          class="px-3 py-1.5 text-xs font-sans rounded-lg bg-accent-gold text-white hover:bg-accent-gold/80 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {{ replacingText ? '替换中...' : '替换' }}
+        </button>
       </div>
     </div>
   </div>

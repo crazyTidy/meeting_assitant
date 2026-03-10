@@ -30,6 +30,17 @@ class SummaryUpdateRequest(BaseModel):
     content: str
 
 
+class SegmentUpdate(BaseModel):
+    """Single segment update."""
+    id: str
+    transcript: str
+
+
+class BatchSegmentUpdateRequest(BaseModel):
+    """Request model for batch updating segments."""
+    updates: list[SegmentUpdate]
+
+
 @router.post(
     "/",
     response_model=MeetingResponse,
@@ -367,24 +378,43 @@ async def download_docx(
 
     # Generate DOCX
     try:
-        docx_bytes = generate_meeting_minutes_docx(
-            meeting_title=meeting.title,
-            content=meeting.summary.content
-        )
+        from ..utils.md2docx import MarkdownToDocxConverter
+        import tempfile
+        import shutil
 
-        # Create filename
-        safe_title = "".join(c for c in meeting.title if c.isalnum() or c in (' ', '-', '_')).strip()
-        filename = f"{safe_title}_会议纪要.docx"
-        encoded_filename = quote(filename)
+        # Create temporary output folder
+        temp_dir = Path(tempfile.mkdtemp())
 
-        # Return file response
-        return Response(
-            content=docx_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-            }
-        )
+        try:
+            # Use MarkdownToDocxConverter
+            converter = MarkdownToDocxConverter(
+                input_content=meeting.summary.content,
+                title=meeting.title,
+                output_folder=str(temp_dir)
+            )
+            converter.convert()
+
+            # Read generated docx file
+            with open(converter.output_docx, 'rb') as f:
+                docx_bytes = f.read()
+
+            # Create filename
+            safe_title = "".join(c for c in meeting.title if c.isalnum() or c in (' ', '-', '_')).strip()
+            filename = f"{safe_title}_会议纪要.docx"
+            encoded_filename = quote(filename)
+
+            # Return file response
+            return Response(
+                content=docx_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+                }
+            )
+        finally:
+            # Clean up temporary folder
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     except Exception as e:
         logger.error(f"[DOCX] Failed to generate document: {e}")
         raise HTTPException(
@@ -415,3 +445,36 @@ async def update_speaker_name(
             detail={"error": {"code": "NOT_FOUND", "message": "说话人不存在"}}
         )
     return {"updated_count": result, "speaker_id": speaker_id}
+
+
+@router.patch(
+    "/{meeting_id}/segments/batch",
+    responses={404: {"model": ErrorResponse}}
+)
+async def batch_update_segments(
+    meeting_id: str,
+    request: BatchSegmentUpdateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Batch update segment transcripts."""
+    from sqlalchemy import update
+    from ..models.merged_segment_model import MergedSegment
+
+    meeting = await meeting_service.get_meeting(db, meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "会议不存在"}}
+        )
+
+    updated_count = 0
+    for seg_update in request.updates:
+        result = await db.execute(
+            update(MergedSegment)
+            .where(MergedSegment.id == seg_update.id)
+            .values(transcript=seg_update.transcript)
+        )
+        updated_count += result.rowcount
+
+    await db.commit()
+    return {"updated_count": updated_count}

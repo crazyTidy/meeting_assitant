@@ -59,7 +59,8 @@ class Settings(BaseSettings):
     # External APIs
     ZHIPU_API_KEY: str = "bd0265bc4e17414da4fbfa64ed303a46.2pUrRsJ5sQhpTHAY"
     SEPARATION_API_KEY: str = ""
-    SEPARATION_API_URL: str = "http://192.168.0.100:40901/recognize"
+    # SEPARATION_API_URL: str = "http://192.168.0.100:40901/recognize"
+    SEPARATION_API_URL: str = "http://192.168.0.101:40150/recognize"
     ASR_API_KEY: str = ""
     ASR_API_URL: str = ""
     # Task Processing

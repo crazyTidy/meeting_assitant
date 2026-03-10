@@ -148,6 +148,15 @@ export const meetingApi = {
   }> {
     const response = await api.post(`/meetings/${meetingId}/regenerate-summary`)
     return response.data
+  },
+
+  // Batch update segment transcripts
+  async batchUpdateSegments(
+    meetingId: string,
+    updates: Array<{ id: string; transcript: string }>
+  ): Promise<{ updated_count: number }> {
+    const response = await api.patch(`/meetings/${meetingId}/segments/batch`, { updates })
+    return response.data
   }
 }
 

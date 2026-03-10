@@ -224,6 +224,28 @@ export const useMeetingStore = defineStore('meeting', () => {
     }
   }
 
+  async function batchUpdateTranscripts(
+    meetingId: string,
+    updates: Array<{ id: string; transcript: string }>
+  ) {
+    try {
+      await meetingApi.batchUpdateSegments(meetingId, updates)
+
+      // Update local state
+      if (currentMeeting.value?.id === meetingId && currentMeeting.value.merged_segments) {
+        updates.forEach(update => {
+          const segment = currentMeeting.value!.merged_segments.find(s => s.id === update.id)
+          if (segment) {
+            segment.transcript = update.transcript
+          }
+        })
+      }
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    }
+  }
+
   function setPage(newPage: number) {
     page.value = newPage
     fetchMeetings()
@@ -263,6 +285,7 @@ export const useMeetingStore = defineStore('meeting', () => {
     downloadAudio,
     updateSummary,
     regenerateSummary,
+    batchUpdateTranscripts,
     setPage,
     setSearch,
     clearError
